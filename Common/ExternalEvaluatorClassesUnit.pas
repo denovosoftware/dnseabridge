@@ -114,11 +114,16 @@ type
   private
     FScriptFileName: string;
     FInputMatrix: TDynMatrix<double>;
+    FParameterNames: TStringList;
+    FEventsAsRows: boolean;
   protected
     procedure DefineProperties(Filer: TFiler); override;
     procedure readInputMatrix(fromStream: TStream);
     procedure writeInputMatrix(toStream: TStream);
+    procedure SetParameterNames(const Value: TStringList);
   public
+    constructor Create(aowner: TComponent); override;
+    destructor Destroy; override;
     procedure SaveToStream(aStream: TStream);
     procedure LoadFromStream(aStream: TStream);
     procedure SizeMatrix(aRow: Integer; aCol: Integer);
@@ -128,6 +133,8 @@ type
   published
     // The script file name is the path and name of the script that will be executeded by the  evaluator.
     property ScriptFileName: string read FScriptFileName write FScriptFileName;
+    property ParameterNames: TStringList read FParameterNames write SetParameterNames;
+    property EventsAsRows: boolean read FEventsAsRows write FEventsAsRows;
   end;
 
   IBasicEvaluator=Interface
@@ -321,6 +328,18 @@ begin
   ParamType := gdt_IsSingle;
 end;
 
+constructor TExternalEvaluatorinput.Create(aowner: TComponent);
+begin
+  inherited;
+  FParameterNames := TStringList.Create;
+end;
+
+destructor TExternalEvaluatorinput.Destroy;
+begin
+  FParameterNames.Free;
+  inherited;
+end;
+
 procedure TExternalEvaluatorinput.DefineProperties(Filer: TFiler);
 begin
   inherited;
@@ -405,6 +424,11 @@ end;
 procedure TExternalEvaluatorinput.SizeMatrix(aRow: Integer; aCol: Integer);
 begin
   SetLength(FInputMatrix, aRow, aCol);
+end;
+
+procedure TExternalEvaluatorinput.SetParameterNames(const Value: TStringList);
+begin
+  FParameterNames.Assign(Value);
 end;
 
 initialization
