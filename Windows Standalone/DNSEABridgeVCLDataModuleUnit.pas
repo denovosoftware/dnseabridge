@@ -48,8 +48,6 @@ uses
 
 type
   TDNSEABridgeVCLDataModule = class(TDataModule)
-    DenovoRemoteOpaRTetheringManager: TTetheringManager;
-    TetheringAppProfile: TTetheringAppProfile;
     DNSEABridgeActionList: TActionList;
     acRunCluster: TAction;
     acNewParam: TAction;
@@ -70,15 +68,23 @@ type
   strict private
     FEngine: IREngine;
     FInputData: TExternalEvaluatorinput;
+    FDenovoRemoteOpaRTetheringManager: TTetheringManager;
+    FTetheringAppProfile: TTetheringAppProfile;
     procedure CloseDNSEABridge;
+    procedure SetupREngine;
+    procedure SetupTetheringResourcesAndActions;
   strict protected
     function GetS4Results(const aInput: TExternalEvaluatorInput; aResultData:
-      TExternalEvaluatorResult): IS4Object;
+        TExternalEvaluatorResult): IS4Object;
     function ValidateS4Results(const aNumNewParams: integer; aNames:
         TArray<string>; const aNumElements: integer): boolean;
-    procedure SetErrorMessage(const aErrorMessage: string; aResult:
+    procedure AppendErrorMessage(const aErrorMessage: string; aResult:
         TExternalEvaluatorResult);
     procedure SetResultResource(aResult: TExternalEvaluatorResult);
+    property DenovoRemoteOpaRTetheringManager: TTetheringManager read
+      FDenovoRemoteOpaRTetheringManager;
+    property TetheringAppProfile: TTetheringAppProfile read
+      FTetheringAppProfile;
   end;
 
 var
@@ -92,7 +98,7 @@ implementation
 {$R *.dfm}
 
 uses
-  Windows;
+  Windows, opaR.EngineExtension, System.Math, opaR.NativeUtility;
 
 var
   DNSEABridgeMutexHandle: THandle;
@@ -107,6 +113,27 @@ const
   RESULT_NAME = 'RResult';
   SERVER_VERSION_NAME = 'ServerVersion';
 
+
+///
+///  TCloseThread gives us access to the main thread.
+///  Application.MainForm.Close will only work from the main thread
+///
+///  If the DNS EA Bridge is closed with the action acCloseDNSEABridge, it must
+///  be called asynchronously. If the remote tether does not call this action
+///  asynch, then the remote action call will cause a crash as the bridge may
+///  not properly signal the end of the action.
+///
+type
+  TCloseThread = class(TThread)
+  protected
+    procedure Execute; override;
+  end;
+
+procedure TCloseThread.Execute;
+begin
+  Synchronize(Application.MainForm.Close);
+end;
+
 procedure TDNSEABridgeVCLDataModule.acCloseDNSEABridgeExecute(Sender: TObject);
 begin
   CloseDNSEABridge;
@@ -114,21 +141,52 @@ end;
 
 procedure TDNSEABridgeVCLDataModule.DataModuleDestroy(Sender: TObject);
 begin
+  // Actions that are added to the tethering profile will notify the profile when
+  // they are freed. This will cause an access violation if we do not remove this
+  // notification before freeing the tethering profile
+  acCloseDNSEABridge.RemoveFreeNotification(FTetheringAppProfile);
+  acRunCluster.RemoveFreeNotification(FTetheringAppProfile);
+  acNewParam.RemoveFreeNotification(FTetheringAppProfile);
+
   FreeAndNil(FInputData);
+  try
+    FreeAndNil(FDenovoRemoteOpaRTetheringManager);
+  except
+    on Exception do
+    // Ignore any and all errors
+    ;
+  end;
+  try
+    FreeAndNil(FTetheringAppProfile);
+  except
+    on Exception do
+    // Ignore any and all errors
+    ;
+  end;
 end;
 
 procedure TDNSEABridgeVCLDataModule.DataModuleCreate(Sender: TObject);
 begin
-  try
-    TREngine.SetEnvironmentVariables;
-    FEngine := TREngine.GetInstance;
-    FInputData := TExternalEvaluatorInput.Create(nil);
-    TetheringAppProfile.Resources.FindByName(SERVER_VERSION_NAME).Value := 1;
-  except
-    on E: exception do
-      // Something went wrong with the service. Make the version invalid so we don't even try to connect to it.
-      TetheringAppProfile.Resources.FindByName(SERVER_VERSION_NAME).Value := 0;
-  end;
+  FDenovoRemoteOpaRTetheringManager:= TTetheringManager.Create(nil);
+  FDenovoRemoteOpaRTetheringManager.Password := '2667F497E81344268D5BCBF062A6E3C0';
+  FDenovoRemoteOpaRTetheringManager.Text := 'DenovoRemoteOpaRTetheringManager';
+  FDenovoRemoteOpaRTetheringManager.Name := 'DenovoRemoteOpaRTetheringManager';
+  FDenovoRemoteOpaRTetheringManager.AllowedAdapters := 'Network';
+  FDenovoRemoteOpaRTetheringManager.Enabled := True;
+
+  FTetheringAppProfile:= TTetheringAppProfile.Create(nil);
+  FTetheringAppProfile.Manager := FDenovoRemoteOpaRTetheringManager;
+  FTetheringAppProfile.Group := 'DenovoOpaREvaluator';
+  FTetheringAppProfile.Name := 'TetheringAppProfile';
+  FTetheringAppProfile.Text := 'TetheringAppProfile';
+  FTetheringAppProfile.Visible := True;
+  FTetheringAppProfile.Enabled := True;
+
+  SetupTetheringResourcesAndActions;
+
+  FInputData := TExternalEvaluatorInput.Create(nil);
+
+  SetupREngine;
 end;
 
 procedure TDNSEABridgeVCLDataModule.InputDataResourceReceived(const Sender: TObject;
@@ -154,7 +212,6 @@ begin
   clusteringResult := TExternalEvaluatorResult.Create(nil);
 
   try
-  begin
     FInputData.LoadFromStream(TetheringAppProfile.GetRemoteResourceValue(
       DenovoRemoteOpaRTetheringManager.RemoteProfiles.Items[0],INPUT_NAME).Value.AsStream);
     s4Results := GetS4Results(FInputData, clusteringResult);
@@ -176,15 +233,17 @@ begin
         clusteringResult.Status := EV_STATUS_OK;
       end
       else
-        SetErrorMessage('Number of clusters did not match results.', clusteringResult);
+        AppendErrorMessage(Format('Number of clusters did not match results: '+
+          #13#10'Number of Clusters: %d, Number of Names: %d', [numberOfClusters,
+          length(clusterNames)]), clusteringResult);
     end
     else
-     SetErrorMessage('Cluster result data is not valid.', clusteringResult);
-  end
+      AppendErrorMessage('Cluster result data is not valid.', clusteringResult);
+
   except
-  on e: Exception do
-    SetErrorMessage('An exception occurred while processing cluster asignment.',
-      clusteringResult);
+    on e: Exception do
+      AppendErrorMessage('An exception occurred while processing cluster asignment: '
+        + e.Message, clusteringResult);
   end;
 
   SetResultResource(clusteringResult);
@@ -203,7 +262,6 @@ var
 begin
   newParamResult := TExternalEvaluatorResult.Create(nil);
   try
-  begin
     FInputData.LoadFromStream(TetheringAppProfile.GetRemoteResourceValue(
       DenovoRemoteOpaRTetheringManager.RemoteProfiles.Items[0],INPUT_NAME).Value.AsStream);
     s4Results := GetS4Results(FInputData, newParamResult);
@@ -226,16 +284,17 @@ begin
         end
       end
       else
-        SetErrorMessage ('Number of new parameters did not match results.', newParamResult);
+        AppendErrorMessage(Format('Number of new parameters did not match results: '+
+          #13#10'Number of New Parameters: %d, Number of Names: %d', [numberOfNewParams,
+          length(newParamNames)]), newParamResult);
     end
     else
-      SetErrorMessage('Parameter result data invalid.', newParamResult);
-  end;
+      AppendErrorMessage('Parameter result data invalid.', newParamResult);
 
   except
     on e: Exception do
-      SetErrorMessage('An exception occurred while processing new parameter ' +
-                        'transformation.', newParamResult);
+      AppendErrorMessage('An exception occurred while processing new parameter ' +
+                        'transformation: '+ e.Message, newParamResult);
   end;
 
   SetResultResource(newParamResult);
@@ -243,13 +302,12 @@ begin
 end;
 
 procedure TDNSEABridgeVCLDataModule.CloseDNSEABridge;
+var
+  closeThread: TCloseThread;
 begin
   TrayIconDNSEABridge.Visible := False;
-  Application.ProcessMessages;
-  TrayIconDNSEABridge.Free;
-  TetheringAppProfile.Free;
-  DenovoRemoteOpaRTetheringManager.Free;
-  Application.MainForm.Close;
+  closeThread := TCloseThread.Create;
+  closeThread.FreeOnTerminate := True;
 end;
 
 procedure TDNSEABridgeVCLDataModule.SetResultResource(aResult: TExternalEvaluatorResult);
@@ -264,7 +322,8 @@ begin
   outStream.Free;
 end;
 
-function TDNSEABridgeVCLDataModule.GetS4Results(const aInput: TExternalEvaluatorinput;  aResultData: TExternalEvaluatorResult): IS4Object;
+function TDNSEABridgeVCLDataModule.GetS4Results(const aInput:
+    TExternalEvaluatorInput; aResultData: TExternalEvaluatorResult): IS4Object;
 var
   fileName : String;
   fn1: IRFunction;
@@ -274,9 +333,15 @@ var
   setParamNamesDef: TStringBuilder;
   ParamNameOrientation: String;
   matSymbolName: String;
+  savedExceptionMask: TArithmeticExceptionMask;
 begin
-  if Assigned(FEngine) then
+  if not Assigned(FEngine) then
   begin
+    AppendErrorMessage ('R is not Installed.', aResultData);
+    result := nil;
+    exit;
+  end;
+
   // catch any exceptions coming from R
   try
     newMat := FEngine.CreateNumericMatrix(aInput.InputMatrix);
@@ -323,21 +388,35 @@ begin
     fileName := StringReplace(aInput.ScriptFileName, '\', '/', [rfReplaceAll]);
     FEngine.Evaluate('source(' + QuotedStr(fileName) + ')');
     fn1 := FEngine.Evaluate('Execute').AsFunction;
-    expr := fn1.Invoke(newMat as ISymbolicExpression);
-    result := expr.AsS4;
+
+    try
+      // Save the current exception mask
+      // Add exceptions to the mask for floating point operations. The R.dll does
+      // not handle these exceptions gracefully, and we want the behavior in the
+      // script to replicate the behavior seen when running R from the R GUI
+      savedExceptionMask := System.Math.GetExceptionMask;
+      System.Math.SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide,
+                                      exOverflow, exUnderflow, exPrecision]);
+
+      // Execute the R script file with the data supplied from the
+      // TExternalEvaluatorInput
+      expr := fn1.Invoke(newMat as ISymbolicExpression);
+      result := expr.AsS4;
+    finally
+      // We now want to reset the exception mask to the state it was before we
+      // ran the R script. Also, clear and raise any exceptions that may have
+      // been thrown during the execution of the R script.
+      System.Math.SetExceptionMask(savedExceptionMask);
+      ClearExceptions(True, [exInvalidOp, exDenormalized, exZeroDivide,
+                                      exOverflow, exUnderflow, exPrecision]);
+    end;
 
   except
     on e: Exception do
     begin
-      SetErrorMessage ('Error running R Script: ', aResultData);
+      AppendErrorMessage ('Error running R Script:'#13#10 + e.Message, aResultData);
       result := nil;
     end;
-    end;
-  end
-  else
-  begin
-    SetErrorMessage ('R is not Installed: ', aResultData);
-    result := nil;
   end;
 end;
 
@@ -365,11 +444,70 @@ begin
   result := (aNumNewParams = length(aNames));
 end;
 
-procedure TDNSEABridgeVCLDataModule.SetErrorMessage(const aErrorMessage: string; aResult:
-  TExternalEvaluatorResult);
+procedure TDNSEABridgeVCLDataModule.AppendErrorMessage(const aErrorMessage:
+    string; aResult: TExternalEvaluatorResult);
 begin
   aResult.Status := EV_STATUS_ERROR;
-  aResult.Errormessage := aErrorMessage;
+  if aResult.ErrorMessage = '' then
+    aResult.ErrorMessage := aErrorMessage
+  else
+    aResult.ErrorMessage := aResult.ErrorMessage + #13#10 + aErrorMessage;
+end;
+
+procedure TDNSEABridgeVCLDataModule.SetupREngine;
+begin
+  try
+    TREngine.SetEnvironmentVariables;
+    FEngine := TREngine.GetInstance;
+    FTetheringAppProfile.Resources.FindByName(SERVER_VERSION_NAME).Value := 1;
+  except
+    on E: exception do
+      // Something went wrong with the service.
+      // Make the version invalid so we don't even try to connect to it.
+      FTetheringAppProfile.Resources.FindByName(SERVER_VERSION_NAME).Value := 0;
+  end;
+end;
+
+procedure TDNSEABridgeVCLDataModule.SetupTetheringResourcesAndActions;
+var
+  tetheringResource: TLocalResource;
+  tetheringAction: TLocalAction;
+begin
+  tetheringResource:= FTetheringAppProfile.Resources.Add;
+  tetheringResource.Name := 'RInputData';
+  tetheringResource.ResType := TRemoteResourceType.Stream;
+  tetheringResource.Kind := TTetheringRemoteKind.Shared;
+  tetheringResource.OnResourceReceived := InputDataResourceReceived;
+
+  tetheringResource:= FTetheringAppProfile.Resources.Add;
+  tetheringResource.Name := 'RResult';
+  tetheringResource.IsPublic := True;
+  tetheringResource.ResType := TRemoteResourceType.Stream;
+  tetheringResource.Kind := TTetheringRemoteKind.Shared;
+
+  tetheringResource:= FTetheringAppProfile.Resources.Add;
+  tetheringResource.Name := 'ServerVersion';
+  tetheringResource.ResType := TRemoteResourceType.Data;
+  tetheringResource.Kind := TTetheringRemoteKind.Shared;
+  tetheringResource.OnResourceReceived := InputDataResourceReceived;
+
+  tetheringAction:= FTetheringAppProfile.Actions.Add;
+  tetheringAction.Name := 'acRunCluster';
+  tetheringAction.Kind := TTetheringRemoteKind.Shared;
+  tetheringAction.Action := acRunCluster;
+  tetheringAction.NotifyUpdates := False;
+
+  tetheringAction:= FTetheringAppProfile.Actions.Add;
+  tetheringAction.Name := 'acNewParam';
+  tetheringAction.Kind := TTetheringRemoteKind.Shared;
+  tetheringAction.Action := acNewParam;
+  tetheringAction.NotifyUpdates := False;
+
+  tetheringAction:= FTetheringAppProfile.Actions.Add;
+  tetheringAction.Name := 'acCloseDNSEABridge';
+  tetheringAction.Kind := TTetheringRemoteKind.Shared;
+  tetheringAction.Action := acCloseDNSEABridge;
+  tetheringAction.NotifyUpdates := False;
 end;
 
 

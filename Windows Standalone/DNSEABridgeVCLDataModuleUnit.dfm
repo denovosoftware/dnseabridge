@@ -4,55 +4,6 @@ object DNSEABridgeVCLDataModule: TDNSEABridgeVCLDataModule
   OnDestroy = DataModuleDestroy
   Height = 246
   Width = 355
-  object DenovoRemoteOpaRTetheringManager: TTetheringManager
-    Password = '2667F497E81344268D5BCBF062A6E3C0'
-    Text = 'DenovoRemoteOpaRTetheringManager'
-    AllowedAdapters = 'Network'
-    Left = 96
-    Top = 80
-  end
-  object TetheringAppProfile: TTetheringAppProfile
-    Manager = DenovoRemoteOpaRTetheringManager
-    Text = 'TetheringAppProfile'
-    Group = 'DenovoOpaREvaluator'
-    Actions = <
-      item
-        Name = 'acRunCluster'
-        IsPublic = True
-        Action = acRunCluster
-        NotifyUpdates = False
-      end
-      item
-        Name = 'acNewParam'
-        IsPublic = True
-        Action = acNewParam
-        NotifyUpdates = False
-      end
-      item
-        Name = 'acCloseDNSEABridge'
-        IsPublic = True
-        Action = acCloseDNSEABridge
-        NotifyUpdates = False
-      end>
-    Resources = <
-      item
-        Name = 'RInputData'
-        IsPublic = True
-        ResType = Stream
-        OnResourceReceived = InputDataResourceReceived
-      end
-      item
-        Name = 'RResult'
-        IsPublic = True
-        ResType = Stream
-      end
-      item
-        Name = 'ServerVersion'
-        IsPublic = True
-      end>
-    Left = 104
-    Top = 16
-  end
   object DNSEABridgeActionList: TActionList
     Left = 248
     Top = 16
