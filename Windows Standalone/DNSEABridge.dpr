@@ -1,5 +1,7 @@
 program DNSEABridge;
 
+{$R *.res}
+
 uses
   Vcl.Forms,
   DNSEABridgeVCLDataModuleUnit in 'DNSEABridgeVCLDataModuleUnit.pas' {DNSEABridgeVCLDataModule: TDataModule},
