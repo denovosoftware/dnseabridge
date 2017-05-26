@@ -19,6 +19,10 @@ object DNSEABridgeVCLDataModule: TDNSEABridgeVCLDataModule
       Caption = 'acCloseDNSEABridge'
       OnExecute = acCloseDNSEABridgeExecute
     end
+    object acGetExceptionsText: TAction
+      Caption = 'acGetExceptionsText'
+      OnExecute = acGetExceptionsTextExecute
+    end
   end
   object TrayIconDNSEABridge: TTrayIcon
     Hint = 'De Novo Software External Application Bridge'

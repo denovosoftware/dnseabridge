@@ -52,6 +52,7 @@ type
     acRunCluster: TAction;
     acNewParam: TAction;
     acCloseDNSEABridge: TAction;
+    acGetExceptionsText: TAction;
     TrayIconDNSEABridge: TTrayIcon;
     popupMenuDNSEABridge: TPopupMenu;
     mniAbout: TMenuItem;
@@ -63,12 +64,15 @@ type
       const AResource: TRemoteResource);
     procedure acRunClusterExecute(Sender: TObject);
     procedure acNewParamExecute(Sender: TObject);
+    procedure acGetExceptionsTextExecute(Sender: TObject);
+    procedure DoOnException(Sender: TObject; aException: Exception);
     procedure ExitDNSEABridgeWithWarning(Sender: TObject);
     procedure ShowAboutForm(Sender: TObject);
   strict private
     FEngine: IREngine;
     FInputData: TExternalEvaluatorinput;
     FDenovoRemoteOpaRTetheringManager: TTetheringManager;
+    FErrorStringList: TStringList;
     FTetheringAppProfile: TTetheringAppProfile;
     procedure CloseDNSEABridge;
     procedure SetupREngine;
@@ -79,16 +83,20 @@ type
     function ValidateS4Results(const aNumNewParams: integer; aNames:
         TArray<string>; const aNumElements: integer): boolean;
     procedure AppendErrorMessage(const aErrorMessage: string; aResult:
-        TExternalEvaluatorResult);
+        TExternalEvaluatorResult; const aException: Exception = nil);
     procedure SetResultResource(aResult: TExternalEvaluatorResult);
     property DenovoRemoteOpaRTetheringManager: TTetheringManager read
       FDenovoRemoteOpaRTetheringManager;
     property TetheringAppProfile: TTetheringAppProfile read
       FTetheringAppProfile;
+  public
+    property ErrorStringList: TStringList read FErrorStringList;
   end;
 
 var
   DNSEABridgeVCLDataModule: TDNSEABridgeVCLDataModule;
+
+procedure LogExceptionInFile(aException: Exception);
 
 implementation
 
@@ -98,11 +106,94 @@ implementation
 {$R *.dfm}
 
 uses
-  Windows, opaR.EngineExtension, System.Math, opaR.NativeUtility;
+  System.Math,
+  WinApi.Windows,
+  WinApi.ShlObj,
+  WinApi.KnownFolders,
+  Winapi.ActiveX,
+
+  opaR.EngineExtension,
+  opaR.NativeUtility;
+
+procedure LogExceptionInFile(aException: Exception);
+
+  procedure ShowErrorMsg(const aErrorMsg: string);
+  var
+    flags: Integer;
+    errMsg: string;
+  begin
+    flags := MB_OK or MB_ICONERROR;
+
+    if (aErrorMsg <> '') and (aErrorMsg[Length(aErrorMsg)] > '.') then
+      errMsg := aErrorMsg + '.'
+    else
+      errMsg := aErrorMsg;
+
+    MessageBox(0, PChar(errMsg), 'De Novo Software External Application Bridge', flags);
+  end;
+
+  procedure WriteErrorToFile(bException: Exception; const bFileName: string);
+  var
+    fileStrings: TStringList;
+  begin
+    if bFileName = '' then
+    begin
+      ShowErrorMsg(bException.ClassName + ': ' + bException.Message);
+      exit;
+    end;
+
+    fileStrings := TStringList.Create;
+    if FileExists(bFileName) then
+      fileStrings.LoadFromFile(bFileName);
+
+    fileStrings.Add(Format('%s - %s: %s',[
+              FormatDateTime('mm/dd/yyyy hh:nn:ss AM/PM', Now),
+              bException.ClassName,
+              bException.Message]));
+
+    // Try to write the file to the log file. If there is a problem with this
+    // write step, show the error as a popup
+    try
+      fileStrings.SaveToFile(bFileName);
+    except
+      on Exception do
+      begin
+        ShowErrorMsg(bException.ClassName + ': ' + bException.Message);
+      end;
+    end;
+    FreeAndNil(fileStrings);
+  end;
+
+  function DefaultFileName: string;
+  var
+    folder: string;
+    PAppDataFolder: PChar;
+  begin
+    PAppDataFolder := nil;
+    result := '';
+
+    if SHGetKnownFolderPath(FOLDERID_ProgramData, KF_FLAG_DEFAULT, THandle(0),
+                                    PAppDataFolder) = S_OK then
+    begin
+      folder := IncludeTrailingPathDelimiter(string(PAppDataFolder));
+      folder := folder + DNSEABRIDGE_ERROR_LOG_APPDATA_FOLDER;
+
+      if not DirectoryExists(folder) then
+        ForceDirectories(folder);
+
+      result := folder + DNSEABRIDGE_ERROR_LOG_FILE_NAME;
+    end;
+
+    if PAppDataFolder <> nil then
+      CoTaskMemFree(PAppDataFolder);
+  end;
+
+begin
+  WriteErrorToFile(aException, DefaultFileName);
+end;
 
 var
   DNSEABridgeMutexHandle: THandle;
-
 
 const
   WARNING_CLOSE_SERVER = 'Exiting the De Novo Software External Application '+
@@ -163,30 +254,42 @@ begin
     // Ignore any and all errors
     ;
   end;
+  FErrorStringList.Free;
 end;
 
 procedure TDNSEABridgeVCLDataModule.DataModuleCreate(Sender: TObject);
 begin
-  FDenovoRemoteOpaRTetheringManager:= TTetheringManager.Create(nil);
-  FDenovoRemoteOpaRTetheringManager.Password := '2667F497E81344268D5BCBF062A6E3C0';
-  FDenovoRemoteOpaRTetheringManager.Text := 'DenovoRemoteOpaRTetheringManager';
-  FDenovoRemoteOpaRTetheringManager.Name := 'DenovoRemoteOpaRTetheringManager';
-  FDenovoRemoteOpaRTetheringManager.AllowedAdapters := 'Network';
-  FDenovoRemoteOpaRTetheringManager.Enabled := True;
+  FErrorStringList := TStringList.Create;
 
-  FTetheringAppProfile:= TTetheringAppProfile.Create(nil);
-  FTetheringAppProfile.Manager := FDenovoRemoteOpaRTetheringManager;
-  FTetheringAppProfile.Group := 'DenovoOpaREvaluator';
-  FTetheringAppProfile.Name := 'TetheringAppProfile';
-  FTetheringAppProfile.Text := 'TetheringAppProfile';
-  FTetheringAppProfile.Visible := True;
-  FTetheringAppProfile.Enabled := True;
+  try
+    FDenovoRemoteOpaRTetheringManager:= TTetheringManager.Create(nil);
+    FDenovoRemoteOpaRTetheringManager.Password := '2667F497E81344268D5BCBF062A6E3C0';
+    FDenovoRemoteOpaRTetheringManager.Text := 'DenovoRemoteOpaRTetheringManager';
+    FDenovoRemoteOpaRTetheringManager.Name := 'DenovoRemoteOpaRTetheringManager';
+    FDenovoRemoteOpaRTetheringManager.AllowedAdapters := 'Network';
+    FDenovoRemoteOpaRTetheringManager.Enabled := True;
 
-  SetupTetheringResourcesAndActions;
+    FTetheringAppProfile:= TTetheringAppProfile.Create(nil);
+    FTetheringAppProfile.Manager := FDenovoRemoteOpaRTetheringManager;
+    FTetheringAppProfile.Group := 'DenovoOpaREvaluator';
+    FTetheringAppProfile.Name := 'TetheringAppProfile';
+    FTetheringAppProfile.Text := 'TetheringAppProfile';
+    FTetheringAppProfile.Visible := True;
+    FTetheringAppProfile.Enabled := True;
 
-  FInputData := TExternalEvaluatorInput.Create(nil);
+    SetupTetheringResourcesAndActions;
 
-  SetupREngine;
+    FInputData := TExternalEvaluatorInput.Create(nil);
+
+    SetupREngine;
+
+  except
+    // If we have any exceptions when setting up the EA bridge, then pass the
+    // exception to the default exception handler. This will populate the default
+    // error log and set the server version to zero
+    on E: Exception do
+      DoOnException(self, E);
+  end;
 end;
 
 procedure TDNSEABridgeVCLDataModule.InputDataResourceReceived(const Sender: TObject;
@@ -195,8 +298,8 @@ begin
   // Check for input data
   if (AResource.Name = INPUT_NAME) then
   begin
-   AResource.Value.AsStream.Position := 0;
-   FInputData.LoadFromStream(AResource.Value.AsStream);
+    AResource.Value.AsStream.Position := 0;
+    FInputData.LoadFromStream(AResource.Value.AsStream);
   end;
 end;
 
@@ -243,7 +346,7 @@ begin
   except
     on e: Exception do
       AppendErrorMessage('An exception occurred while processing cluster asignment: '
-        + e.Message, clusteringResult);
+        + e.Message, clusteringResult, e);
   end;
 
   SetResultResource(clusteringResult);
@@ -294,11 +397,24 @@ begin
   except
     on e: Exception do
       AppendErrorMessage('An exception occurred while processing new parameter ' +
-                        'transformation: '+ e.Message, newParamResult);
+                        'transformation: '+ e.Message, newParamResult, e);
   end;
 
   SetResultResource(newParamResult);
   FreeAndNil(newParamResult);
+end;
+
+procedure TDNSEABridgeVCLDataModule.acGetExceptionsTextExecute(Sender: TObject);
+var
+  exceptionsResult: TExternalEvaluatorResult;
+  errorCntr: integer;
+begin
+  exceptionsResult := TExternalEvaluatorResult.Create(nil);
+  for errorCntr := 0 to ErrorStringList.Count - 1 do
+    AppendErrorMessage(ErrorStringList[errorCntr], exceptionsResult);
+
+  SetResultResource(exceptionsResult);
+  exceptionsResult.Free;
 end;
 
 procedure TDNSEABridgeVCLDataModule.CloseDNSEABridge;
@@ -414,7 +530,7 @@ begin
   except
     on e: Exception do
     begin
-      AppendErrorMessage ('Error running R Script:'#13#10 + e.Message, aResultData);
+      AppendErrorMessage('Error running R Script:'#13#10 + e.Message, aResultData, e);
       result := nil;
     end;
   end;
@@ -445,7 +561,8 @@ begin
 end;
 
 procedure TDNSEABridgeVCLDataModule.AppendErrorMessage(const aErrorMessage:
-    string; aResult: TExternalEvaluatorResult);
+    string; aResult: TExternalEvaluatorResult; const aException: Exception =
+    nil);
 begin
   aResult.Status := EV_STATUS_ERROR;
   if aResult.ErrorMessage = '' then
@@ -454,18 +571,26 @@ begin
     aResult.ErrorMessage := aResult.ErrorMessage + #13#10 + aErrorMessage;
 end;
 
+procedure TDNSEABridgeVCLDataModule.DoOnException(Sender: TObject; aException:
+    Exception);
+begin
+  ErrorStringList.Add(Format('%s: %s',[aException.ClassName, aException.Message]));
+
+  if Assigned(FTetheringAppProfile) and
+    Assigned(FTetheringAppProfile.Resources.FindByName(SERVER_VERSION_NAME)) then
+  begin
+    FTetheringAppProfile.Resources.FindByName(SERVER_VERSION_NAME).Value := 0;
+  end
+  else
+    LogExceptionInFile(aException);
+end;
+
 procedure TDNSEABridgeVCLDataModule.SetupREngine;
 begin
-  try
-    TREngine.SetEnvironmentVariables;
-    FEngine := TREngine.GetInstance;
-    FTetheringAppProfile.Resources.FindByName(SERVER_VERSION_NAME).Value := 1;
-  except
-    on E: exception do
-      // Something went wrong with the service.
-      // Make the version invalid so we don't even try to connect to it.
-      FTetheringAppProfile.Resources.FindByName(SERVER_VERSION_NAME).Value := 0;
-  end;
+  TREngine.SetEnvironmentVariables;
+  FEngine := TREngine.GetInstance;
+  FTetheringAppProfile.Resources.FindByName(SERVER_VERSION_NAME).Value :=
+                    ExternalEvaluatorClassesUnit.CURRENT_DNS_EA_BRIDGE_VERSION;
 end;
 
 procedure TDNSEABridgeVCLDataModule.SetupTetheringResourcesAndActions;
@@ -507,6 +632,12 @@ begin
   tetheringAction.Name := 'acCloseDNSEABridge';
   tetheringAction.Kind := TTetheringRemoteKind.Shared;
   tetheringAction.Action := acCloseDNSEABridge;
+  tetheringAction.NotifyUpdates := False;
+
+  tetheringAction:= FTetheringAppProfile.Actions.Add;
+  tetheringAction.Name := 'acGetExceptionsText';
+  tetheringAction.Kind := TTetheringRemoteKind.Shared;
+  tetheringAction.Action := acGetExceptionsText;
   tetheringAction.NotifyUpdates := False;
 end;
 
