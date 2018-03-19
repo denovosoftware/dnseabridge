@@ -41,7 +41,8 @@ uses
   DNSEABridgeVCLDataModuleUnit in 'DNSEABridgeVCLDataModuleUnit.pas' {DNSEABridgeVCLDataModule: TDataModule},
   ExternalEvaluatorClassesUnit in '..\Common\ExternalEvaluatorClassesUnit.pas',
   DNSEABridgeHiddenForm in 'DNSEABridgeHiddenForm.pas' {Form1},
-  AboutDNSEABridgeFormUnit in 'AboutDNSEABridgeFormUnit.pas' {AboutDNSEABridgeForm};
+  AboutDNSEABridgeFormUnit in 'AboutDNSEABridgeFormUnit.pas' {AboutDNSEABridgeForm},
+  DNSEABridgeRScriptRunnerUnit in '..\Common\DNSEABridgeRScriptRunnerUnit.pas';
 
 begin
   try

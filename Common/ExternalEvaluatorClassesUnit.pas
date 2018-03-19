@@ -144,10 +144,20 @@ type
     property EventsAsRows: boolean read FEventsAsRows write FEventsAsRows;
   end;
 
-  IBasicEvaluator=Interface
+
+  INeedConnectionCompleteNotifications = interface
+    ['{036359C5-5762-4D3F-8A7D-924EBDAEAF7C}']
+    procedure ConnectionCompleted;
+  end;
+
+  IBasicEvaluator = Interface
     ['{DFABC3D7-9934-4A85-BCC1-B6546A26B177}']
     function IdentifierName: string;
     procedure InitializeConnections;
+    procedure AddConnectionCompleteNotifier(const aNeedsConnectionNotification:
+        INeedConnectionCompleteNotifications);
+    procedure RemoveConnectionCompleteNotifier(const aNeedsConnectionNotification:
+        INeedConnectionCompleteNotifications);
   end;
 
 implementation
