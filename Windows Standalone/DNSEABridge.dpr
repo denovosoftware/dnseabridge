@@ -40,16 +40,14 @@ uses
   WinApi.Windows,
   DNSEABridgeVCLDataModuleUnit in 'DNSEABridgeVCLDataModuleUnit.pas' {DNSEABridgeVCLDataModule: TDataModule},
   ExternalEvaluatorClassesUnit in '..\Common\ExternalEvaluatorClassesUnit.pas',
-  DNSEABridgeHiddenForm in 'DNSEABridgeHiddenForm.pas' {Form1},
-  AboutDNSEABridgeFormUnit in 'AboutDNSEABridgeFormUnit.pas' {AboutDNSEABridgeForm},
-  DNSEABridgeRScriptRunnerUnit in '..\Common\DNSEABridgeRScriptRunnerUnit.pas';
+  DNSEABridgeHiddenFormUnit in 'DNSEABridgeHiddenFormUnit.pas' {DNSEABridgeHiddenForm};
 
 begin
   try
     Application.Initialize;
     Application.CreateForm(TDNSEABridgeVCLDataModule, DNSEABridgeVCLDataModule);
-    Application.OnException := DNSEABridgeVCLDataModule.DoOnException;
-    Application.CreateForm(TForm1, Form1);
+    Application.CreateForm(TDNSEABridgeHiddenForm, DNSEABridgeHiddenForm);
+
     Application.ShowMainForm := False;
     Application.Run;
   except

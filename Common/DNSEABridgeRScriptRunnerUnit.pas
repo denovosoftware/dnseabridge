@@ -34,6 +34,9 @@ uses
   {De Novo Software External Application Bridge}
   ExternalEvaluatorClassesUnit;
 
+const
+  CRLF = #13#10;
+
 type
   TOnNeedsToAddErrorMessage = procedure(const aErrorMessage: string; aResult:
       TExternalEvaluatorResult; const aException: Exception = nil) of object;
@@ -50,6 +53,7 @@ type
         TArray<string>; const aNumElements: integer): boolean;
   public
     procedure SetupREngine;
+    function CurrentVersionOfRdll: string;
     procedure PerformClustering(const aInput: TExternalEvaluatorInput; aResultData:
         TExternalEvaluatorResult);
     procedure PerformNewParam(const aInput: TExternalEvaluatorInput; aResultData:
@@ -63,6 +67,14 @@ implementation
 uses
   opaR.EngineExtension,
   opaR.NativeUtility;
+
+function TDNSEABridgeRScriptRunner.CurrentVersionOfRdll: string;
+var
+  versionAsPAnsiChar: PAnsiChar;
+begin
+  versionAsPAnsiChar := FEngine.Rapi.DLLVersion;
+  Result := string(versionAsPAnsiChar);
+end;
 
 procedure TDNSEABridgeRScriptRunner.DoAppendErrorMessage(const aErrorMessage:
     string; aResult: TExternalEvaluatorResult; const aException: Exception =
@@ -164,7 +176,7 @@ begin
   except
     on e: Exception do
     begin
-      DoAppendErrorMessage('Error running R Script:'#13#10 + e.Message, aResultData, e);
+      DoAppendErrorMessage('Error running R Script:' + CRLF + e.Message, aResultData, e);
       result := nil;
     end;
   end;
@@ -199,7 +211,7 @@ begin
     end
     else
       DoAppendErrorMessage(Format('Number of clusters did not match results: '+
-        #13#10'Number of Clusters: %d, Number of Names: %d', [numberOfClusters,
+        CRLF + 'Number of Clusters: %d, Number of Names: %d', [numberOfClusters,
         length(clusterNames)]), aResultData);
   end
   else
@@ -237,7 +249,7 @@ begin
     end
     else
       DoAppendErrorMessage(Format('Number of new parameters did not match results: '+
-        #13#10'Number of New Parameters: %d, Number of Names: %d', [numberOfNewParams,
+        CRLF + 'Number of New Parameters: %d, Number of Names: %d', [numberOfNewParams,
         length(newParamNames)]), aResultData);
   end
   else

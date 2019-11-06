@@ -24,8 +24,8 @@ If not, see <http://www.gnu.org/licenses/>.
 interface
 
 uses
-   Classes,
-   contnrs,
+   System.Classes,
+   System.Contnrs,
    System.SysUtils,
    System.Generics.Collections
    ;
@@ -40,6 +40,7 @@ const
   DNSEABRIDGE_ERROR_LOG_FILE_NAME = 'DNSEABridgeErrors.txt';
 
   DNSEABRIDGE_ERROR_LOG = DNSEABRIDGE_ERROR_LOG_APPDATA_FOLDER + DNSEABRIDGE_ERROR_LOG_FILE_NAME;
+  DNSEABRIDGE_NO_UI_CMD_PARAM = '-NoUI';
 
 type
   TGenericDataType = (

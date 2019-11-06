@@ -23,10 +23,6 @@ interface
 
 uses
   Vcl.ActnList,
-  Vcl.Menus,
-  Vcl.ExtCtrls,
-  Vcl.Forms,
-  Vcl.Dialogs,
   System.Actions,
   System.SysUtils,
   System.Classes,
@@ -39,8 +35,14 @@ uses
   IPPeerServer,
 
   {De Novo Software External Application Bridge}
+
+  {$IFDEf WINE}
+  DNSEABridgeWineSpecificActivationUnit,
+  {$ELSE}
+  DNSEABridgeWindowsTrayIconUnit,
+  {$ENDIF}
+
   ExternalEvaluatorClassesUnit,
-  AboutDNSEABridgeFormUnit,
   DNSEABridgeRScriptRunnerUnit;
 
 type
@@ -50,10 +52,6 @@ type
     acNewParam: TAction;
     acCloseDNSEABridge: TAction;
     acGetExceptionsText: TAction;
-    TrayIconDNSEABridge: TTrayIcon;
-    popupMenuDNSEABridge: TPopupMenu;
-    mniAbout: TMenuItem;
-    mniQuit: TMenuItem;
     procedure acCloseDNSEABridgeExecute(Sender: TObject);
     procedure DataModuleDestroy(Sender: TObject);
     procedure DataModuleCreate(Sender: TObject);
@@ -63,17 +61,24 @@ type
     procedure acNewParamExecute(Sender: TObject);
     procedure acGetExceptionsTextExecute(Sender: TObject);
     procedure DoOnException(Sender: TObject; aException: Exception);
-    procedure ExitDNSEABridgeWithWarning(Sender: TObject);
-    procedure ShowAboutForm(Sender: TObject);
   strict private
     FRScriptRunner: TDNSEABridgeRScriptRunner;
     FInputData: TExternalEvaluatorInput;
     FDenovoRemoteOpaRTetheringManager: TTetheringManager;
     FErrorStringList: TStringList;
     FTetheringAppProfile: TTetheringAppProfile;
-    procedure CloseDNSEABridge;
+    FShowUI: boolean;
+  {$IFDEF WINE}
+    FWineSpecificAction: TDNSEABridgeWineSpecificActivation;
+  {$ELSE}
+    FDNSEABridgeTrayIconForm: TDNSEABridgeWindowsTrayIconForm;
+  {$ENDIF}
+    procedure CloseDNSEABridge(Sender: TObject);
+    procedure HandleBeforeClosingBridge;
+    procedure SetupApplicationEvents;
     procedure SetupREngine;
     procedure SetupTetheringResourcesAndActions;
+    procedure UpdateRVersionInMenu;
   strict protected
     procedure AppendErrorMessage(const aErrorMessage: string; aResult:
         TExternalEvaluatorResult; const aException: Exception = nil);
@@ -103,7 +108,9 @@ uses
   WinApi.Windows,
   WinApi.ShlObj,
   WinApi.KnownFolders,
-  Winapi.ActiveX;
+  Winapi.ActiveX,
+  Vcl.Forms
+  ;
 
 procedure LogExceptionInFile(aException: Exception);
 
@@ -186,10 +193,6 @@ var
   DNSEABridgeMutexHandle: THandle;
 
 const
-  WARNING_CLOSE_SERVER = 'Exiting the De Novo Software External Application '+
-    'Bridge can cause failure in FCS Express data transformations '+
-    'that interact with the application bridge. ' +
-    sLineBreak + 'Do you wish to close the De Novo Software External Application Bridge?';
   INPUT_NAME = 'RInputData';
   RESULT_NAME = 'RResult';
   SERVER_VERSION_NAME = 'ServerVersion';
@@ -205,19 +208,46 @@ const
 ///  not properly signal the end of the action.
 ///
 type
+  TBeforeShutdownEvent = procedure of object;
+
   TCloseThread = class(TThread)
+  strict private
+    FOnBeforeShutdown: TBeforeShutdownEvent;
+    procedure DoBeforeShutdown;
+    procedure ExecuteInternal;
   protected
     procedure Execute; override;
+  public
+    constructor Create;
+    property OnBeforeShutdown: TBeforeShutdownEvent read FOnBeforeShutdown write
+        FOnBeforeShutdown;
   end;
+
+constructor TCloseThread.Create;
+begin
+  inherited Create(True);
+end;
+
+procedure TCloseThread.DoBeforeShutdown;
+begin
+  if Assigned(FOnBeforeShutdown) then
+    FOnBeforeShutdown;
+end;
 
 procedure TCloseThread.Execute;
 begin
-  Synchronize(Application.MainForm.Close);
+  Synchronize(ExecuteInternal);
+end;
+
+procedure TCloseThread.ExecuteInternal;
+begin
+  DoBeforeShutdown;
+  Application.MainForm.Close;
 end;
 
 procedure TDNSEABridgeVCLDataModule.acCloseDNSEABridgeExecute(Sender: TObject);
 begin
-  CloseDNSEABridge;
+  CloseDNSEABridge(Sender);
 end;
 
 procedure TDNSEABridgeVCLDataModule.DataModuleDestroy(Sender: TObject);
@@ -250,8 +280,24 @@ end;
 procedure TDNSEABridgeVCLDataModule.DataModuleCreate(Sender: TObject);
 begin
   FErrorStringList := TStringList.Create;
-
   try
+    // Check if the calling process wants to enablee the UI.
+    if (ParamCount > 0) and SameText(Trim(ParamStr(1)), DNSEABRIDGE_NO_UI_CMD_PARAM) then
+      FShowUI := False
+    else
+      FShowUI := True;
+
+  {$IFDEF WINE}
+    FWineSpecificAction := TDNSEABridgeWineSpecificActivation.Create;
+    if FShowUI then
+      FWineSpecificAction.MinimizeDNSEABridgeOnStartup;
+  {$ELSE}
+    FDNSEABridgeTrayIconForm := TDNSEABridgeWindowsTrayIconForm.Create(nil);
+    FDNSEABridgeTrayIconForm.OnNeedsToQuitApplication := CloseDNSEABridge;
+  {$ENDIF}
+
+    FInputData := TExternalEvaluatorInput.Create(nil);
+
     FDenovoRemoteOpaRTetheringManager:= TTetheringManager.Create(nil);
     FDenovoRemoteOpaRTetheringManager.Password := '2667F497E81344268D5BCBF062A6E3C0';
     FDenovoRemoteOpaRTetheringManager.Text := 'DenovoRemoteOpaRTetheringManager';
@@ -267,13 +313,16 @@ begin
     FTetheringAppProfile.Visible := True;
     FTetheringAppProfile.Enabled := True;
 
-    FRScriptRunner := TDNSEABridgeRScriptRunner.Create(self);
-    FRScriptRunner.OnNeedsToAppendErrorMessage := AppendErrorMessage;
-
+    // Now that we have created the tethering objects, we should now create
+    // the remote events on the tethering profile. This way, if something goes
+    // wrong while setting up script runner, the remote action to return the errpr
+    // messages and to close the DNSEABridge will be hooked up.
     SetupTetheringResourcesAndActions;
 
-    FInputData := TExternalEvaluatorInput.Create(nil);
-
+    // Finally, setup the script runner. The most likely place for errors to
+    // occur will be here.
+    FRScriptRunner := TDNSEABridgeRScriptRunner.Create(self);
+    FRScriptRunner.OnNeedsToAppendErrorMessage := AppendErrorMessage;
     SetupREngine;
 
   except
@@ -283,6 +332,11 @@ begin
     on E: Exception do
       DoOnException(self, E);
   end;
+
+  // After creating the tethering objects, setup the events of the TApplication form
+  // For windows, this will setup the application with the DoOnException event.
+  // For WINE, this will also setup OnRestore and OnActivate events
+  SetupApplicationEvents;
 end;
 
 procedure TDNSEABridgeVCLDataModule.InputDataResourceReceived(const Sender:
@@ -304,7 +358,7 @@ begin
 
   try
     FInputData.LoadFromStream(TetheringAppProfile.GetRemoteResourceValue(
-      DenovoRemoteOpaRTetheringManager.RemoteProfiles.Items[0],INPUT_NAME).Value.AsStream);
+      DenovoRemoteOpaRTetheringManager.RemoteProfiles.Items[0], INPUT_NAME).Value.AsStream);
 
     FRScriptRunner.PerformClustering(FInputData, clusteringResult);
   except
@@ -324,7 +378,7 @@ begin
   newParamResult := TExternalEvaluatorResult.Create(nil);
   try
     FInputData.LoadFromStream(TetheringAppProfile.GetRemoteResourceValue(
-      DenovoRemoteOpaRTetheringManager.RemoteProfiles.Items[0],INPUT_NAME).Value.AsStream);
+      DenovoRemoteOpaRTetheringManager.RemoteProfiles.Items[0], INPUT_NAME).Value.AsStream);
 
     FRScriptRunner.PerformNewParam(FInputData, newParamResult);
   except
@@ -350,13 +404,14 @@ begin
   exceptionsResult.Free;
 end;
 
-procedure TDNSEABridgeVCLDataModule.CloseDNSEABridge;
+procedure TDNSEABridgeVCLDataModule.CloseDNSEABridge(Sender: TObject);
 var
   closeThread: TCloseThread;
 begin
-  TrayIconDNSEABridge.Visible := False;
   closeThread := TCloseThread.Create;
+  closeThread.OnBeforeShutdown := HandleBeforeClosingBridge;
   closeThread.FreeOnTerminate := True;
+  closeThread.Start;
 end;
 
 procedure TDNSEABridgeVCLDataModule.SetResultResource(aResult: TExternalEvaluatorResult);
@@ -371,24 +426,6 @@ begin
   outStream.Free;
 end;
 
-procedure TDNSEABridgeVCLDataModule.ShowAboutForm(Sender: TObject);
-begin
-  // Create the form if it has not been created yet
-  if not Assigned(AboutDNSEABridgeForm) then
-    AboutDNSEABridgeForm := TAboutDNSEABridgeForm.Create(Application);
-
-  // Show the about form.
-  //  If the form was closed, this will reopen the form.
-  //  If the form is already showing, this will bring the form to the front
-  AboutDNSEABridgeForm.Show;
-end;
-
-procedure TDNSEABridgeVCLDataModule.ExitDNSEABridgeWithWarning(Sender: TObject);
-begin
-  if MessageDlg(WARNING_CLOSE_SERVER, mtConfirmation, [mbYes, mbNo], 0) = mrYes then
-    CloseDNSEABridge;
-end;
-
 procedure TDNSEABridgeVCLDataModule.AppendErrorMessage(const aErrorMessage:
     string; aResult: TExternalEvaluatorResult; const aException: Exception =
     nil);
@@ -397,7 +434,7 @@ begin
   if aResult.ErrorMessage = '' then
     aResult.ErrorMessage := aErrorMessage
   else
-    aResult.ErrorMessage := aResult.ErrorMessage + #13#10 + aErrorMessage;
+    aResult.ErrorMessage := aResult.ErrorMessage + CRLF + aErrorMessage;
 end;
 
 procedure TDNSEABridgeVCLDataModule.DoOnException(Sender: TObject; aException:
@@ -414,11 +451,30 @@ begin
     LogExceptionInFile(aException);
 end;
 
+procedure TDNSEABridgeVCLDataModule.HandleBeforeClosingBridge;
+begin
+  Application.OnRestore := nil;
+  Application.OnActivate := nil;
+{$IFNDEF WINE}
+  FDNSEABridgeTrayIconForm.PrepareToShutdownApplication;
+{$ENDIF}
+end;
+
+procedure TDNSEABridgeVCLDataModule.SetupApplicationEvents;
+begin
+  Application.OnException := DoOnException;
+  {$IFDEF WINE}
+  Application.OnRestore := FWineSpecificAction.HandleApplicationRestore;
+  Application.OnActivate := FWineSpecificAction.HandleApplicationActivate;
+  {$ENDIF}
+end;
+
 procedure TDNSEABridgeVCLDataModule.SetupREngine;
 begin
   FRScriptRunner.SetupREngine;
   FTetheringAppProfile.Resources.FindByName(SERVER_VERSION_NAME).Value :=
                     ExternalEvaluatorClassesUnit.CURRENT_DNS_EA_BRIDGE_VERSION;
+  UpdateRVersionInMenu;
 end;
 
 procedure TDNSEABridgeVCLDataModule.SetupTetheringResourcesAndActions;
@@ -470,13 +526,25 @@ begin
 end;
 
 
-initialization
+procedure TDNSEABridgeVCLDataModule.UpdateRVersionInMenu;
+{$IFDEF WINE}
+begin
+end;
+{$ELSE}
+var
+  curRDllVersion: string;
+begin
+  curRDllVersion := FRScriptRunner.CurrentVersionOfRdll;
 
+  FDNSEABridgeTrayIconForm.VersionOfRAsString := 'R Version: ' + curRDllVersion;
+end;
+{$ENDIF}
+
+
+initialization
   DNSEABridgeMutexHandle := CreateMutex(nil, false, 'DNSEABridgeMutex');
 
-
 finalization
-
   CloseHandle(DNSEABridgeMutexHandle);
 
 
