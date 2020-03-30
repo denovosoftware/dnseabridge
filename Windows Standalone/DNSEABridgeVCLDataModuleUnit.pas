@@ -52,6 +52,8 @@ type
     acNewParam: TAction;
     acCloseDNSEABridge: TAction;
     acGetExceptionsText: TAction;
+    acAutoGating: TAction;
+    procedure acAutoGatingExecute(Sender: TObject);
     procedure acCloseDNSEABridgeExecute(Sender: TObject);
     procedure DataModuleDestroy(Sender: TObject);
     procedure DataModuleCreate(Sender: TObject);
@@ -245,6 +247,26 @@ begin
   Application.MainForm.Close;
 end;
 
+procedure TDNSEABridgeVCLDataModule.acAutoGatingExecute(Sender: TObject);
+var
+  autogatingResult: TExternalEvaluatorResult;
+begin
+  autogatingResult := TExternalEvaluatorResult.Create(nil);
+  try
+    FInputData.LoadFromStream(TetheringAppProfile.GetRemoteResourceValue(
+      DenovoRemoteOpaRTetheringManager.RemoteProfiles.Items[0], INPUT_NAME).Value.AsStream);
+
+    FRScriptRunner.PerformAutogating(FInputData, autogatingResult);
+  except
+    on e: Exception do
+      AppendErrorMessage('An exception occurred while processing autogating: ' + e.Message,
+            autogatingResult, e);
+  end;
+
+  SetResultResource(autogatingResult);
+  FreeAndNil(autogatingResult);
+end;
+
 procedure TDNSEABridgeVCLDataModule.acCloseDNSEABridgeExecute(Sender: TObject);
 begin
   CloseDNSEABridge(Sender);
@@ -258,7 +280,7 @@ begin
   acCloseDNSEABridge.RemoveFreeNotification(FTetheringAppProfile);
   acRunCluster.RemoveFreeNotification(FTetheringAppProfile);
   acNewParam.RemoveFreeNotification(FTetheringAppProfile);
-
+  acAutoGating.RemoveFreeNotification(FTetheringAppProfile);
   FreeAndNil(FInputData);
   try
     FreeAndNil(FDenovoRemoteOpaRTetheringManager);
@@ -522,6 +544,12 @@ begin
   tetheringAction.Name := 'acGetExceptionsText';
   tetheringAction.Kind := TTetheringRemoteKind.Shared;
   tetheringAction.Action := acGetExceptionsText;
+  tetheringAction.NotifyUpdates := False;
+
+  tetheringAction:= FTetheringAppProfile.Actions.Add;
+  tetheringAction.Name := 'acAutoGating';
+  tetheringAction.Kind := TTetheringRemoteKind.Shared;
+  tetheringAction.Action := acAutoGating;
   tetheringAction.NotifyUpdates := False;
 end;
 

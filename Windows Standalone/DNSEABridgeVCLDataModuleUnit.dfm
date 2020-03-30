@@ -23,5 +23,9 @@ object DNSEABridgeVCLDataModule: TDNSEABridgeVCLDataModule
       Caption = 'acGetExceptionsText'
       OnExecute = acGetExceptionsTextExecute
     end
+    object acAutoGating: TAction
+      Caption = 'acAutoGating'
+      OnExecute = acAutoGatingExecute
+    end
   end
 end

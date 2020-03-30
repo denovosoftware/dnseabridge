@@ -45,7 +45,8 @@ const
 type
   TGenericDataType = (
     gdt_IsSingle,
-    gdt_IsClassification);
+    gdt_IsClassification,
+    gdt_NoData);
 
   TAbstractExternalEvaluatorResultData = class(TComponent)
   private
@@ -86,6 +87,16 @@ type
   private
   public
     constructor Create(aowner: TComponent); override;
+  end;
+
+  TAutoGatingExternalEvaluatorResultData = class(TAbstractExternalEvaluatorResultData)
+  private
+    FGatingMl: String;
+  public
+    procedure SaveToStream(aStream: TStream); override;
+    procedure LoadFromStream(aStream: TStream); override;
+    constructor Create(aowner: TComponent); override;
+    property GatingMl: String read FGatingMl write FGatingMl;
   end;
 
   TExternalEvaluatorResultDataList = class(TObjectList<TAbstractExternalEvaluatorResultData>)
@@ -346,6 +357,32 @@ begin
   ParamType := gdt_IsSingle;
 end;
 
+procedure TAutoGatingExternalEvaluatorResultData.SaveToStream(aStream: TStream);
+var
+  len: Cardinal;
+begin
+  inherited;
+  len := ByteLength(fGatingMl);
+  aStream.Write(len,SizeOf(len));
+  aStream.write(PChar(fGatingMl)^, len);
+end;
+
+procedure TAutoGatingExternalEvaluatorResultData.LoadFromStream(aStream: TStream);
+var
+  len: Cardinal;
+begin
+  inherited;
+  aStream.Read(len,SizeOf(len));
+  setLength(fGatingMl,len);
+  aStream.Read(PChar(fGatingMl)^, len);
+end;
+
+constructor TAutoGatingExternalEvaluatorResultData.Create(aowner: TComponent);
+begin
+  inherited;
+  ParamType := gdt_NoData;
+end;
+
 constructor TExternalEvaluatorinput.Create(aowner: TComponent);
 begin
   inherited;
@@ -451,7 +488,8 @@ end;
 
 initialization
   registerClasses([TExternalEvaluatorinput, TExternalEvaluatorResult,
-                    TClusterAssignmentResultData, TNewParameterResultData]);
+                    TClusterAssignmentResultData, TNewParameterResultData,
+                    TAutoGatingExternalEvaluatorResultData]);
 
 end.
 

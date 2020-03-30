@@ -58,6 +58,7 @@ type
         TExternalEvaluatorResult);
     procedure PerformNewParam(const aInput: TExternalEvaluatorInput; aResultData:
         TExternalEvaluatorResult);
+    procedure PerformAutoGating(const aInput: TExternalEvaluatorInput; aResultData: TExternalEvaluatorResult);
     property OnNeedsToAppendErrorMessage: TOnNeedsToAddErrorMessage read
         FOnNeedsToAppendErrorMessage write FOnNeedsToAppendErrorMessage;
   end;
@@ -254,6 +255,33 @@ begin
   end
   else
     DoAppendErrorMessage('Parameter result data invalid.', aResultData);
+
+end;
+
+procedure TDNSEABridgeRScriptRunner.PerformAutoGating(const aInput: TExternalEvaluatorInput; aResultData: TExternalEvaluatorResult);
+var
+  s4Results: IS4Object;
+  gatingMl: string;
+  resData: TAutoGatingExternalEvaluatorResultData;
+begin
+  s4Results := GetS4Results(aInput, aResultData);
+
+  if (s4Results <> nil) then
+  begin
+    gatingMl := s4Results['gatingML'].AsCharacter.First;
+
+    if gatingMl <> '' then
+    begin
+      resData := TAutoGatingExternalEvaluatorResultData.create(nil);
+      resData.gatingMl := gatingMl;
+      aResultData.AddResultData(resData);
+      aResultData.Status := EV_STATUS_OK;
+    end
+    else
+      DoAppendErrorMessage('Gating ML was not returned', aResultData);
+  end
+  else
+    DoAppendErrorMessage('Result data invalid.', aResultData);
 
 end;
 
