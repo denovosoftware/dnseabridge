@@ -25,7 +25,7 @@ interface
 
 uses
    System.Classes,
-   System.Contnrs,
+
    System.SysUtils,
    System.Generics.Collections
    ;
@@ -127,12 +127,13 @@ type
     property Errormessage: string read FErrorMessage write FErrormessage;
   end;
 
-  TDynMatrix<T> = array of TArray<T>;
+  TArrayMatrix<T> = array of TArray<T>;
+  TDoubleMatrix = TArrayMatrix<Double>;
 
   TExternalEvaluatorinput = class(TComponent)
   private
     FScriptFileName: string;
-    FInputMatrix: TDynMatrix<double>;
+    FInputMatrix: TDoubleMatrix;
     FParameterNames: TStringList;
     FEventsAsRows: boolean;
   protected
@@ -148,7 +149,7 @@ type
     procedure SizeMatrix(aRow: Integer; aCol: Integer);
     // The colums for this matrix contain the data parameters. The matrix row data are the
     // cells/data points.
-    property InputMatrix: TDynMatrix<double> read FInputMatrix write FInputMatrix;
+    property InputMatrix: TDoubleMatrix read FInputMatrix write FInputMatrix;
   published
     // The script file name is the path and name of the script that will be executeded by the  evaluator.
     property ScriptFileName: string read FScriptFileName write FScriptFileName;

@@ -226,7 +226,7 @@ var
   s4Results: IS4Object;
   numberOfNewParams: integer;
   newParamNames: Tarray<string>;
-  newColumns: TDynMatrix<double>;
+  newColumns: TDoubleMatrix;
   newParamResultData: TnewParameterResultData;
 begin
   s4Results := GetS4Results(aInput, aResultData);
