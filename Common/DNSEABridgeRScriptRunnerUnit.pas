@@ -35,7 +35,7 @@ uses
   ExternalEvaluatorClassesUnit;
 
 const
-  CRLF = #13#10;
+  CRLF = System.sLineBreak;
 
 type
   TOnNeedsToAddErrorMessage = procedure(const aErrorMessage: string; aResult:
@@ -45,6 +45,7 @@ type
   strict private
     FEngine: IREngine;
     FOnNeedsToAppendErrorMessage: TOnNeedsToAddErrorMessage;
+    procedure ReloadRDll;
     procedure DoAppendErrorMessage(const aErrorMessage: string; aResult:
         TExternalEvaluatorResult; const aException: Exception = nil);
     function GetS4Results(const aInput: TExternalEvaluatorInput; aResultData:
@@ -58,7 +59,8 @@ type
         TExternalEvaluatorResult);
     procedure PerformNewParam(const aInput: TExternalEvaluatorInput; aResultData:
         TExternalEvaluatorResult);
-    procedure PerformAutoGating(const aInput: TExternalEvaluatorInput; aResultData: TExternalEvaluatorResult);
+    procedure PerformAutoGating(const aInput: TExternalEvaluatorInput; aResultData:
+        TExternalEvaluatorResult);
     property OnNeedsToAppendErrorMessage: TOnNeedsToAddErrorMessage read
         FOnNeedsToAppendErrorMessage write FOnNeedsToAppendErrorMessage;
   end;
@@ -97,8 +99,11 @@ var
   ParamNameOrientation: String;
   matSymbolName: String;
   savedExceptionMask: TArithmeticExceptionMask;
+  engineToUse: IREngine;
 begin
-  if not Assigned(FEngine) then
+  engineToUse := FEngine;
+
+  if not Assigned(engineToUse) then
   begin
     DoAppendErrorMessage ('R is not Installed.', aResultData);
     result := nil;
@@ -107,7 +112,7 @@ begin
 
   // catch any exceptions coming from R
   try
-    newMat := FEngine.CreateNumericMatrix(aInput.InputMatrix);
+    newMat := engineToUse.CreateNumericMatrix(aInput.InputMatrix);
 
     // Choose to set the col/row names based on the matrix orientation.
     if (aInput.EventsAsRows) then
@@ -117,7 +122,7 @@ begin
 
     // Set the variable inside R so we can run a script on it.
     matSymbolName := 'mat';
-    FEngine.SetSymbol(matSymbolName, newMat as ISymbolicExpression);
+    engineToUse.SetSymbol(matSymbolName, newMat as ISymbolicExpression);
 
     // Make R script to add row or column names;
     setParamNamesDef := TStringBuilder.Create;
@@ -140,17 +145,17 @@ begin
     setParamNamesDef.Append(')');
 
     // Set the row/column names
-    FEngine.Evaluate(setParamNamesDef.ToString);
+    engineToUse.Evaluate(setParamNamesDef.ToString);
 
     setParamNamesDef.Free;
 
     // Get the matrix from R since we are going to pass it into our execute function.
-    newMat := FEngine.GetSymbol(matSymbolName).AsNumericMatrix;
+    newMat := engineToUse.GetSymbol(matSymbolName).AsNumericMatrix;
 
     // R expects forward slashes not back slashes.
     fileName := StringReplace(aInput.ScriptFileName, '\', '/', [rfReplaceAll]);
-    FEngine.Evaluate('source(' + QuotedStr(fileName) + ')');
-    fn1 := FEngine.Evaluate('Execute').AsFunction;
+    engineToUse.Evaluate('source(' + QuotedStr(fileName) + ')');
+    fn1 := engineToUse.Evaluate('Execute').AsFunction;
 
     try
       // Save the current exception mask
@@ -177,8 +182,11 @@ begin
   except
     on e: Exception do
     begin
-      DoAppendErrorMessage('Error running R Script:' + CRLF + e.Message, aResultData, e);
+      engineToUse := nil;
+      DoAppendErrorMessage('Error running R Script:' + CRLF + e.Message,
+                            aResultData, e);
       result := nil;
+      ReloadRDll;
     end;
   end;
 end;
@@ -245,8 +253,8 @@ begin
         newParamResultData.ParamName:= newParamNames[cntr];
         newParamResultData.Data:= newColumns[cntr];
         aResultData.AddResultData(newParamResultData);
-        aResultData.Status := EV_STATUS_OK;
-      end
+      end;
+      aResultData.Status := EV_STATUS_OK;
     end
     else
       DoAppendErrorMessage(Format('Number of new parameters did not match results: '+
@@ -258,7 +266,8 @@ begin
 
 end;
 
-procedure TDNSEABridgeRScriptRunner.PerformAutoGating(const aInput: TExternalEvaluatorInput; aResultData: TExternalEvaluatorResult);
+procedure TDNSEABridgeRScriptRunner.PerformAutoGating(const aInput:
+    TExternalEvaluatorInput; aResultData: TExternalEvaluatorResult);
 var
   s4Results: IS4Object;
   gatingMl: string;
@@ -282,7 +291,12 @@ begin
   end
   else
     DoAppendErrorMessage('Result data invalid.', aResultData);
+end;
 
+procedure TDNSEABridgeRScriptRunner.ReloadRDll;
+begin
+  FEngine := nil;
+  SetupREngine;
 end;
 
 procedure TDNSEABridgeRScriptRunner.SetupREngine;

@@ -75,6 +75,7 @@ type
   {$ELSE}
     FDNSEABridgeTrayIconForm: TDNSEABridgeWindowsTrayIconForm;
   {$ENDIF}
+    procedure LoadInputData;
     procedure CloseDNSEABridge(Sender: TObject);
     procedure HandleBeforeClosingBridge;
     procedure SetupApplicationEvents;
@@ -253,8 +254,7 @@ var
 begin
   autogatingResult := TExternalEvaluatorResult.Create(nil);
   try
-    FInputData.LoadFromStream(TetheringAppProfile.GetRemoteResourceValue(
-      DenovoRemoteOpaRTetheringManager.RemoteProfiles.Items[0], INPUT_NAME).Value.AsStream);
+    LoadInputData;
 
     FRScriptRunner.PerformAutogating(FInputData, autogatingResult);
   except
@@ -374,13 +374,12 @@ end;
 
 procedure TDNSEABridgeVCLDataModule.acRunClusterExecute(Sender: TObject);
 var
- clusteringResult: TExternalEvaluatorResult;
+  clusteringResult: TExternalEvaluatorResult;
 begin
   clusteringResult := TExternalEvaluatorResult.Create(nil);
 
   try
-    FInputData.LoadFromStream(TetheringAppProfile.GetRemoteResourceValue(
-      DenovoRemoteOpaRTetheringManager.RemoteProfiles.Items[0], INPUT_NAME).Value.AsStream);
+    LoadInputData;
 
     FRScriptRunner.PerformClustering(FInputData, clusteringResult);
   except
@@ -399,8 +398,7 @@ var
 begin
   newParamResult := TExternalEvaluatorResult.Create(nil);
   try
-    FInputData.LoadFromStream(TetheringAppProfile.GetRemoteResourceValue(
-      DenovoRemoteOpaRTetheringManager.RemoteProfiles.Items[0], INPUT_NAME).Value.AsStream);
+    LoadInputData;
 
     FRScriptRunner.PerformNewParam(FInputData, newParamResult);
   except
@@ -480,6 +478,19 @@ begin
 {$IFNDEF WINE}
   FDNSEABridgeTrayIconForm.PrepareToShutdownApplication;
 {$ENDIF}
+end;
+
+procedure TDNSEABridgeVCLDataModule.LoadInputData;
+var
+  profileInfo: TTetheringProfileInfo;
+  inputStream: TStream;
+begin
+  profileInfo := DenovoRemoteOpaRTetheringManager.RemoteProfiles.Items[0];
+  inputStream := TetheringAppProfile.GetRemoteResourceValue(
+                    profileInfo, INPUT_NAME).Value.AsStream;
+
+  inputStream.Position := 0;
+  FInputData.LoadFromStream(inputStream);
 end;
 
 procedure TDNSEABridgeVCLDataModule.SetupApplicationEvents;

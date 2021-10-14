@@ -34,7 +34,7 @@ const
   EV_STATUS_OK = 0;
   EV_STATUS_ERROR = 1;
 
-  CURRENT_DNS_EA_BRIDGE_VERSION = 2;
+  CURRENT_DNS_EA_BRIDGE_VERSION = 3;
 
   DNSEABRIDGE_ERROR_LOG_APPDATA_FOLDER = 'De Novo Software\External Application Bridge\';
   DNSEABRIDGE_ERROR_LOG_FILE_NAME = 'DNSEABridgeErrors.txt';
@@ -49,21 +49,23 @@ type
     gdt_NoData);
 
   TAbstractExternalEvaluatorResultData = class(TComponent)
-  private
+  strict private
     FParamType: TGenericDataType;
     FParamName: string;
   public
     procedure SaveToStream(aStream: TStream); virtual; abstract;
     procedure LoadFromStream(aStream: TStream); virtual; abstract;
+    procedure AfterConstruction; override;
   published
     property ParamType: TGenericDataType read FParamType write FParamType;
     property ParamName: string read FParamName write FParamName;
   end;
 
   TExternalEvaluatorResultData<T> = class(TAbstractExternalEvaluatorResultData)
-  private
+  const
+    STREAM_VERSION: integer = 1;
+  strict private
     FData: TArray<T>;
-  protected
     procedure SetData(const aData: TArray<T>);
   public
     property Data: TArray<T> read FData write SetData;
@@ -72,51 +74,60 @@ type
   end;
 
   TClusterAssignmentResultData = class(TExternalEvaluatorResultData<integer>)
-  private
+  strict private
     FClusterNames: TStringList;
     FNumOfClusters: Integer;
   public
     constructor Create(aowner: TComponent); override;
+    procedure AfterConstruction; override;
     destructor Destroy; override;
   published
-    property ClusterNames:TStringList read FClusterNames write FClusterNames;
-    property NumOfClusters:integer read FNumOfClusters write FNumOfClusters;
+    property ClusterNames: TStringList read FClusterNames write FClusterNames;
+    property NumOfClusters: integer read FNumOfClusters write FNumOfClusters;
   end;
 
   TNewParameterResultData = class(TExternalEvaluatorResultData<double>)
-  private
   public
-    constructor Create(aowner: TComponent); override;
+    procedure AfterConstruction; override;
   end;
 
   TAutoGatingExternalEvaluatorResultData = class(TAbstractExternalEvaluatorResultData)
-  private
+  const
+    GATING_ML_STREAM_VERSION: integer = 1;
+  strict private
     FGatingMl: String;
   public
     procedure SaveToStream(aStream: TStream); override;
     procedure LoadFromStream(aStream: TStream); override;
-    constructor Create(aowner: TComponent); override;
+    procedure AfterConstruction; override;
     property GatingMl: String read FGatingMl write FGatingMl;
   end;
 
-  TExternalEvaluatorResultDataList = class(TObjectList<TAbstractExternalEvaluatorResultData>)
+  TExternalEvaluatorResultDataList = class(
+      TObjectList<TAbstractExternalEvaluatorResultData>)
+  const
+    STREAM_VERSION: integer = 1;
   public
     procedure SaveToStream(aStream: TStream);
     procedure LoadFromStream(aStream: TStream);
   end;
 
   TExternalEvaluatorResult = class(TComponent)
-  private
+  const
+    STREAM_VERSION: integer = 1;
+    RESULT_DATA_LIST_STREAM_VERSION: integer = 1;
+  strict private
     FResultDataList: TExternalEvaluatorResultDataList;
     FStatus: Integer;
     FErrorMessage: string;
- protected
+ strict protected
     procedure DefineProperties(Filer: TFiler); override;
-    procedure readResultDataList(aStream: TStream);
-    procedure writeResultDataList(aStream: TStream);
+    procedure ReadResultDataList(aStream: TStream);
+    procedure WriteResultDataList(aStream: TStream);
   public
     constructor Create(aowner: TComponent); override;
     destructor Destroy; override;
+    procedure AfterConstruction; override;
     procedure SaveToStream(aStream: TStream);
     procedure LoadFromStream(aStream: TStream);
     function GetResult(aIndex: Integer): TAbstractExternalEvaluatorResultData;
@@ -130,17 +141,20 @@ type
   TArrayMatrix<T> = array of TArray<T>;
   TDoubleMatrix = TArrayMatrix<Double>;
 
-  TExternalEvaluatorinput = class(TComponent)
-  private
+  TExternalEvaluatorInput = class(TComponent)
+  const
+    STREAM_VERSION: integer = 1;
+    INPUT_MTX_STREAM_VERSION: integer = 1;
+  strict private
     FScriptFileName: string;
     FInputMatrix: TDoubleMatrix;
     FParameterNames: TStringList;
     FEventsAsRows: boolean;
-  protected
-    procedure DefineProperties(Filer: TFiler); override;
-    procedure readInputMatrix(fromStream: TStream);
-    procedure writeInputMatrix(toStream: TStream);
+    procedure ReadInputMatrix(fromStream: TStream);
+    procedure WriteInputMatrix(toStream: TStream);
     procedure SetParameterNames(const Value: TStringList);
+  strict protected
+    procedure DefineProperties(Filer: TFiler); override;
   public
     constructor Create(aowner: TComponent); override;
     destructor Destroy; override;
@@ -185,15 +199,13 @@ var
   cntr: Integer;
   curResult: T;
   numElements: Integer;
-  ver: integer;
 begin
-  ver := 1;
-  aStream.Write(ver, sizeof(ver));
+  aStream.Write(STREAM_VERSION, sizeof(STREAM_VERSION));
 
   numElements:= Length(Data);
   aStream.Write(numElements, sizeof(numElements));
 
-  for cntr :=0 to numElements - 1 do
+  for cntr := 0 to numElements - 1 do
   begin
     curResult := Data[cntr];
     aStream.Write(curResult, sizeof(curResult));
@@ -207,11 +219,13 @@ var
   numElements: Integer;
   ver: integer;
 begin
-  aStream.Read(ver,sizeof(ver));
+  aStream.Read(ver, sizeof(ver));
 
-  if ver <> 1 then
+  if ver <> STREAM_VERSION then
   begin
-    raise Exception.Create('TExternalEvaluatorResultData incorrect version number');
+    raise Exception.CreateFmt('Incorrect version number streaming ' +
+        'TExternalEvaluatorResultData.%sExpected: %d Found: %d',
+        [sLineBReak, STREAM_VERSION, ver]);
   end;
 
   aStream.read(numElements,sizeOf(numElements));
@@ -226,13 +240,11 @@ end;
 
 procedure TExternalEvaluatorResultDataList.SaveToStream(aStream: TStream);
 var
-  ver: integer;
   cntr: integer;
   numElements: integer;
 begin
-  ver := 1;
-  aStream.Write(ver, sizeof(ver));
-  numElements:= count;
+  aStream.Write(STREAM_VERSION, sizeof(STREAM_VERSION));
+  numElements := Count;
   aStream.Write(numElements, sizeof(numElements));
   for cntr := 0 to numElements - 1 do
   begin
@@ -250,9 +262,11 @@ var
 begin
   aStream.Read(ver,sizeof(ver));
 
-  if ver <> 1 then
+  if ver <> STREAM_VERSION then
   begin
-    raise Exception.Create('TExternalEvaluatorResultDataList incorrect version number');
+    raise Exception.CreateFmt('Incorrect ersion number streaming ' +
+        'TExternalEvaluatorResultDataList.%sExpected: %d Found: %d',
+        [sLineBReak, STREAM_VERSION, ver]);
   end;
 
   aStream.read(numElements,sizeOf(numElements));
@@ -270,15 +284,17 @@ begin
   Filer.DefineBinaryProperty('ResultDataList', ReadResultDataList, WriteResultDataList, True);
 end;
 
-procedure TExternalEvaluatorResult.readResultDataList(aStream: TStream);
+procedure TExternalEvaluatorResult.ReadResultDataList(aStream: TStream);
 var
   ver: integer;
 begin
-  aStream.Read(ver,sizeof(ver));
+  aStream.Read(ver, sizeof(integer));
 
-  if ver <> 1 then
+  if ver <> RESULT_DATA_LIST_STREAM_VERSION then
   begin
-    raise Exception.Create('TExternalEvaluatorResultList incorrect version number');
+    raise Exception.CreateFmt('Incorrect version number loading ' +
+        'TExternalEvaluatorResult.ResultDataList.%sExpected: %d. Found: %d.',
+        [sLineBreak, RESULT_DATA_LIST_STREAM_VERSION, ver]);
   end;
 
   FResultDataList.LoadFromStream(aStream);
@@ -296,13 +312,9 @@ begin
   inherited;
 end;
 
-procedure TExternalEvaluatorResult.writeResultDataList(aStream: TStream);
-var
-ver : integer;
+procedure TExternalEvaluatorResult.WriteResultDataList(aStream: TStream);
 begin
-  ver := 1;
-  aStream.Write(ver,sizeof(ver));
-
+  aStream.Write(RESULT_DATA_LIST_STREAM_VERSION, SizeOf(RESULT_DATA_LIST_STREAM_VERSION));
   FResultDataList.SaveToStream(aStream);
 end;
 
@@ -316,12 +328,16 @@ begin
   FResultDataList.add(aResultData);
 end;
 
-procedure TExternalEvaluatorResult.SaveToStream(aStream: TStream);
-var
-  ver: integer;
+procedure TExternalEvaluatorResult.AfterConstruction;
 begin
-  ver := 1;
-  aStream.Write(ver, sizeof(ver));
+  inherited;
+  FStatus := EV_STATUS_ERROR;
+  FErrorMessage := '';
+end;
+
+procedure TExternalEvaluatorResult.SaveToStream(aStream: TStream);
+begin
+  aStream.Write(STREAM_VERSION, SizeOf(STREAM_VERSION));
   aStream.WriteComponent(self);
 end;
 
@@ -331,9 +347,11 @@ var
 begin
   aStream.Read(ver,sizeof(ver));
 
-  if ver <> 1 then
+  if ver <> STREAM_VERSION then
   begin
-    raise Exception.Create('TExternalEvaluatorResult incorrect version number');
+    raise Exception.CreateFmt('Incorrect version number loading ' +
+        'TExternalEvaluatorResult.%sExpected: %d. Found: %d.',
+        [sLineBreak, STREAM_VERSION, ver]);
   end;
 
   aStream.ReadComponent(self);
@@ -341,8 +359,7 @@ end;
 
 constructor TClusterAssignmentResultData.Create(aowner: TComponent);
 begin
-  inherited
-  ParamType := gdt_IsClassification;
+  inherited;
   FClusterNames := TStringList.Create;
 end;
 
@@ -352,7 +369,14 @@ begin
   inherited;
 end;
 
-constructor TNewParameterResultData.Create(aowner: TComponent);
+procedure TClusterAssignmentResultData.AfterConstruction;
+begin
+  inherited;
+  ParamType := gdt_IsClassification;
+end;
+
+
+procedure TNewParameterResultData.AfterConstruction;
 begin
   inherited
   ParamType := gdt_IsSingle;
@@ -363,46 +387,66 @@ var
   len: Cardinal;
 begin
   inherited;
-  len := ByteLength(fGatingMl);
-  aStream.Write(len,SizeOf(len));
-  aStream.write(PChar(fGatingMl)^, len);
+  len := Length(FGatingMl);
+
+  aStream.Write(GATING_ML_STREAM_VERSION, SizeOf(GATING_ML_STREAM_VERSION));
+  aStream.Write(len, SizeOf(len));
+  aStream.Write(PChar(FGatingMl)^, len * SizeOf(Char));
 end;
 
 procedure TAutoGatingExternalEvaluatorResultData.LoadFromStream(aStream: TStream);
 var
   len: Cardinal;
+  streamedCharsBuffer: array of Char;
+  bufferAsPChar: PChar;
+  ver: integer;
 begin
   inherited;
-  aStream.Read(len,SizeOf(len));
-  setLength(fGatingMl,len);
-  aStream.Read(PChar(fGatingMl)^, len);
+  aStream.Read(ver, SizeOf(ver));
+  if ver <> GATING_ML_STREAM_VERSION then
+  begin
+    raise Exception.CreateFmt('Incorrect version number loading ' +
+        'TAutoGatingExternalEvaluatorResultData.%sExpected: %d. Found: %d.',
+        [sLineBreak, GATING_ML_STREAM_VERSION, ver]);
+  end;
+
+  // Read the current stream into a array of char. This array will larger than
+  // the FGatingMl to account for null termination.
+  // Explicitly set the last char to #0 so that we have a valid null terminated PChar
+  aStream.Read(len, SizeOf(len));
+  SetLength(streamedCharsBuffer, len + 1);
+  streamedCharsBuffer[len] := #0;
+
+  bufferAsPChar := @(streamedCharsBuffer[0]);
+  aStream.Read(bufferAsPChar^, len * SizeOf(Char));
+  FGatingMl := bufferAsPChar;
 end;
 
-constructor TAutoGatingExternalEvaluatorResultData.Create(aowner: TComponent);
+procedure TAutoGatingExternalEvaluatorResultData.AfterConstruction;
 begin
   inherited;
   ParamType := gdt_NoData;
 end;
 
-constructor TExternalEvaluatorinput.Create(aowner: TComponent);
+constructor TExternalEvaluatorInput.Create(aowner: TComponent);
 begin
   inherited;
   FParameterNames := TStringList.Create;
 end;
 
-destructor TExternalEvaluatorinput.Destroy;
+destructor TExternalEvaluatorInput.Destroy;
 begin
   FParameterNames.Free;
   inherited;
 end;
 
-procedure TExternalEvaluatorinput.DefineProperties(Filer: TFiler);
+procedure TExternalEvaluatorInput.DefineProperties(Filer: TFiler);
 begin
   inherited;
-  Filer.DefineBinaryProperty('InputMatrix', readInputMatrix, writeInputMatrix, True);
+  Filer.DefineBinaryProperty('InputMatrix', ReadInputMatrix, WriteInputMatrix, True);
 end;
 
-procedure TExternalEvaluatorinput.readInputMatrix(fromStream: TStream);
+procedure TExternalEvaluatorInput.ReadInputMatrix(fromStream: TStream);
 var
   cntrRow: integer;
   cntrColumn: Integer;
@@ -412,29 +456,37 @@ var
   ver: integer;
 begin
   fromStream.read(ver, sizeof(ver));
-  fromStream.read(numColElements,sizeOf(numColElements));
-  fromStream.read(numRowElements,sizeOf(numRowElements));
-  SetLength(FInputmatrix, numRowElements, numColElements);
+
+  if ver <> INPUT_MTX_STREAM_VERSION then
+  begin
+    raise Exception.CreateFmt('Incorrect version number loading ' +
+        'TExternalEvaluatorInput.InputMatrix.%sExpected: %d. Found: %d.',
+        [sLineBreak, STREAM_VERSION, ver]);
+  end;
+
+  fromStream.Read(numColElements, SizeOf(numColElements));
+  fromStream.Read(numRowElements, SizeOf(numRowElements));
+  SetLength(FInputMatrix, numRowElements, numColElements);
 
   for cntrRow :=0 to numRowElements - 1 do
+  begin
     for cntrColumn := 0 to numColElements -1 do
     begin
-      fromStream.Read(curResult,sizeof(curResult));
+      fromStream.Read(curResult, sizeof(curResult));
       InputMatrix[cntrRow][cntrColumn] := curResult;
-    end
+    end;
+  end;
 end;
 
-procedure TExternalEvaluatorinput.writeInputMatrix (toStream: TStream);
+procedure TExternalEvaluatorInput.writeInputMatrix(toStream: TStream);
 var
   cntrRow: integer;
   cntrColumn: Integer;
   numColElements: integer;
   numRowElements: integer;
   curResult : single;
-  ver: integer;
 begin
-  ver:=1;
-  toStream.Write(ver,sizeof(ver));
+  toStream.Write(INPUT_MTX_STREAM_VERSION, sizeof(INPUT_MTX_STREAM_VERSION));
 
   numRowElements:= Length(InputMatrix);
 
@@ -443,52 +495,60 @@ begin
   else
    numColElements := 0;
 
-  toStream.Write(numColElements, sizeof(numColElements));
-  toStream.Write(numRowElements, sizeof(numRowElements));
+  toStream.Write(numColElements, SizeOf(numColElements));
+  toStream.Write(numRowElements, SizeOf(numRowElements));
 
   for cntrRow :=0 to numRowElements - 1 do
+  begin
     for cntrColumn :=0 to numColElements - 1 do
     begin
       curResult := InputMatrix[cntrRow][cntrColumn];
       toStream.Write(curResult, sizeof(curResult));
-  end
+    end;
+  end;
 end;
 
-procedure TExternalEvaluatorinput.SaveToStream(aStream: TStream);
+procedure TExternalEvaluatorInput.SaveToStream(aStream: TStream);
+begin
+  aStream.Write(STREAM_VERSION, sizeof(STREAM_VERSION));
+  aStream.WriteComponent(self);
+end;
+
+procedure TExternalEvaluatorInput.LoadFromStream(aStream: TStream);
 var
   ver: integer;
 begin
-  ver := 1;
-  aStream.Write(ver,sizeof(ver));
-  aStream.WriteComponent(self)
-end;
-
-procedure TExternalEvaluatorinput.LoadFromStream(aStream: TStream);
-var
-ver: integer;
-begin
   aStream.Read(ver,sizeof(ver));
 
-  if ver <> 1 then
+  if ver <> STREAM_VERSION then
   begin
-    raise Exception.Create('TExternalEvaluatorinput incorrect version number');
+    raise Exception.CreateFmt('Incorrect version number found when streaming ' +
+        'TExternalEvaluatorInput.%sExpected: %d Found: %d',
+        [sLineBReak, STREAM_VERSION, ver]);
   end;
 
-  aStream.ReadComponent(self)
+  aStream.ReadComponent(self);
 end;
 
-procedure TExternalEvaluatorinput.SizeMatrix(aRow: Integer; aCol: Integer);
+procedure TExternalEvaluatorInput.SizeMatrix(aRow: Integer; aCol: Integer);
 begin
   SetLength(FInputMatrix, aRow, aCol);
 end;
 
-procedure TExternalEvaluatorinput.SetParameterNames(const Value: TStringList);
+procedure TExternalEvaluatorInput.SetParameterNames(const Value: TStringList);
 begin
   FParameterNames.Assign(Value);
 end;
 
+procedure TAbstractExternalEvaluatorResultData.AfterConstruction;
+begin
+  inherited;
+  FParamType := TGenericDataType.gdt_NoData;
+  FParamName := '';
+end;
+
 initialization
-  registerClasses([TExternalEvaluatorinput, TExternalEvaluatorResult,
+  RegisterClasses([TExternalEvaluatorInput, TExternalEvaluatorResult,
                     TClusterAssignmentResultData, TNewParameterResultData,
                     TAutoGatingExternalEvaluatorResultData]);
 
