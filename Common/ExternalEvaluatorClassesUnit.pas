@@ -19,13 +19,10 @@ If not, see <http://www.gnu.org/licenses/>.
 
 ***************************************************************************************************}
 
-
-
 interface
 
 uses
    System.Classes,
-
    System.SysUtils,
    System.Generics.Collections
    ;
@@ -34,7 +31,7 @@ const
   EV_STATUS_OK = 0;
   EV_STATUS_ERROR = 1;
 
-  CURRENT_DNS_EA_BRIDGE_VERSION = 3;
+  CURRENT_DNS_EA_BRIDGE_VERSION = 4;
 
   DNSEABRIDGE_ERROR_LOG_APPDATA_FOLDER = 'De Novo Software\External Application Bridge\';
   DNSEABRIDGE_ERROR_LOG_FILE_NAME = 'DNSEABridgeErrors.txt';
@@ -91,16 +88,28 @@ type
     procedure AfterConstruction; override;
   end;
 
-  TAutoGatingExternalEvaluatorResultData = class(TAbstractExternalEvaluatorResultData)
+  TAutoGatingExternalEvaluatorResultData =
+    class(TAbstractExternalEvaluatorResultData)
   const
-    GATING_ML_STREAM_VERSION: integer = 1;
+    EXTRA_KV_PAIRS_STREAM_VERSION: Integer = 1;
+    GATING_ML_STREAM_VERSION: Integer = 1;
+    STREAM_VERSION: Integer = 2;
   strict private
-    FGatingMl: String;
+    FExtraKVPairs: TStringList;
+    FGatingML: string;
+    procedure ReadExtraKVPairs(fromStream: TStream);
+    procedure ReadGatingML(fromStream: TStream);
+    procedure SetExtraKVPairs(const aValue: TStringList);
+    procedure WriteExtraKVPairs(toStream: TStream);
+    procedure WriteGatingML(toStream: TStream);
   public
-    procedure SaveToStream(aStream: TStream); override;
-    procedure LoadFromStream(aStream: TStream); override;
+    constructor Create(aowner: TComponent); override;
+    destructor Destroy; override;
     procedure AfterConstruction; override;
-    property GatingMl: String read FGatingMl write FGatingMl;
+    procedure LoadFromStream(aStream: TStream); override;
+    procedure SaveToStream(aStream: TStream); override;
+    property ExtraKVPairs: TStringList read FExtraKVPairs write SetExtraKVPairs;
+    property GatingML: string read FGatingML write FGatingML;
   end;
 
   TExternalEvaluatorResultDataList = class(
@@ -382,50 +391,126 @@ begin
   ParamType := gdt_IsSingle;
 end;
 
-procedure TAutoGatingExternalEvaluatorResultData.SaveToStream(aStream: TStream);
-var
-  len: Cardinal;
+constructor TAutoGatingExternalEvaluatorResultData.Create(aowner: TComponent);
 begin
   inherited;
-  len := Length(FGatingMl);
-
-  aStream.Write(GATING_ML_STREAM_VERSION, SizeOf(GATING_ML_STREAM_VERSION));
-  aStream.Write(len, SizeOf(len));
-  aStream.Write(PChar(FGatingMl)^, len * SizeOf(Char));
+  FExtraKVPairs := TStringList.Create;
 end;
 
-procedure TAutoGatingExternalEvaluatorResultData.LoadFromStream(aStream: TStream);
-var
-  len: Cardinal;
-  streamedCharsBuffer: array of Char;
-  bufferAsPChar: PChar;
-  ver: integer;
+destructor TAutoGatingExternalEvaluatorResultData.Destroy;
 begin
+  FreeAndNil(FExtraKVPairs);
   inherited;
-  aStream.Read(ver, SizeOf(ver));
-  if ver <> GATING_ML_STREAM_VERSION then
-  begin
-    raise Exception.CreateFmt('Incorrect version number loading ' +
-        'TAutoGatingExternalEvaluatorResultData.%sExpected: %d. Found: %d.',
-        [sLineBreak, GATING_ML_STREAM_VERSION, ver]);
-  end;
-
-  // Read the current stream into a array of char. This array will larger than
-  // the FGatingMl to account for null termination.
-  // Explicitly set the last char to #0 so that we have a valid null terminated PChar
-  aStream.Read(len, SizeOf(len));
-  SetLength(streamedCharsBuffer, len + 1);
-  streamedCharsBuffer[len] := #0;
-
-  bufferAsPChar := @(streamedCharsBuffer[0]);
-  aStream.Read(bufferAsPChar^, len * SizeOf(Char));
-  FGatingMl := bufferAsPChar;
 end;
 
 procedure TAutoGatingExternalEvaluatorResultData.AfterConstruction;
 begin
   inherited;
   ParamType := gdt_NoData;
+end;
+
+procedure TAutoGatingExternalEvaluatorResultData.LoadFromStream(aStream:
+    TStream);
+var
+  ver: Integer;
+begin
+  inherited;
+
+  aStream.Read(ver, SizeOf(ver));
+
+  if ver <> STREAM_VERSION then
+  begin
+    raise Exception.CreateFmt('Incorrect version number loading ' +
+      '%s: expected %d, found %d.',
+      [ClassName, STREAM_VERSION, ver]);
+  end;
+
+  ReadGatingML(aStream);
+  ReadExtraKVPairs(aStream);
+end;
+
+procedure TAutoGatingExternalEvaluatorResultData.ReadExtraKVPairs(fromStream:
+    TStream);
+var
+  ver: Integer;
+begin
+  FExtraKVPairs.Clear;
+
+  fromStream.Read(ver, SizeOf(ver));
+  if ver <> EXTRA_KV_PAIRS_STREAM_VERSION then
+  begin
+    raise Exception.CreateFmt('Incorrect ExtraKVPairs version number loading ' +
+      '%s: expected %d, found %d.',
+      [ClassName, EXTRA_KV_PAIRS_STREAM_VERSION, ver]);
+  end;
+
+  FExtraKVPairs.LoadFromStream(fromStream);
+end;
+
+procedure TAutoGatingExternalEvaluatorResultData.ReadGatingML(fromStream:
+    TStream);
+var
+  bufferAsPChar: PChar;
+  len: Cardinal;
+  streamedCharsBuffer: array of Char;
+  ver: Integer;
+begin
+  fromStream.Read(ver, SizeOf(ver));
+  if ver <> GATING_ML_STREAM_VERSION then
+  begin
+    raise Exception.CreateFmt('Incorrect GatingML version number loading ' +
+      '%s: expected %d, found %d.',
+      [ClassName, GATING_ML_STREAM_VERSION, ver]);
+  end;
+
+  // Read the current stream into a array of char. This array will be larger
+  // than the FGatingML to account for null termination.
+  // Explicitly set the last char to #0 so that we have a valid null-terminated
+  // PChar:
+
+  fromStream.Read(len, SizeOf(len));
+  SetLength(streamedCharsBuffer, len + 1);
+  streamedCharsBuffer[len] := #0;
+
+  bufferAsPChar := @(streamedCharsBuffer[0]);
+  fromStream.Read(bufferAsPChar^, len * SizeOf(Char));
+  FGatingML := bufferAsPChar;
+end;
+
+procedure TAutoGatingExternalEvaluatorResultData.SaveToStream(aStream: TStream);
+begin
+  inherited;
+
+  aStream.Write(STREAM_VERSION, SizeOf(STREAM_VERSION));
+
+  WriteGatingML(aStream);
+  WriteExtraKVPairs(aStream);
+end;
+
+procedure TAutoGatingExternalEvaluatorResultData.SetExtraKVPairs(const aValue:
+    TStringList);
+begin
+  FExtraKVPairs.Assign(aValue);
+end;
+
+procedure TAutoGatingExternalEvaluatorResultData.WriteExtraKVPairs(toStream:
+    TStream);
+begin
+  toStream.Write(
+    EXTRA_KV_PAIRS_STREAM_VERSION, SizeOf(EXTRA_KV_PAIRS_STREAM_VERSION));
+  FExtraKVPairs.SaveToStream(toStream);
+end;
+
+procedure TAutoGatingExternalEvaluatorResultData.WriteGatingML(toStream:
+    TStream);
+var
+  len: Cardinal;
+begin
+  len := Length(FGatingML);
+
+  toStream.Write(GATING_ML_STREAM_VERSION, SizeOf(GATING_ML_STREAM_VERSION));
+  toStream.Write(len, SizeOf(len));
+  toStream.Write(PChar(FGatingML)^, len * SizeOf(Char));
 end;
 
 constructor TExternalEvaluatorInput.Create(aowner: TComponent);

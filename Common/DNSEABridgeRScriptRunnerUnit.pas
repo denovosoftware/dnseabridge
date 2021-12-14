@@ -36,6 +36,8 @@ uses
 
 const
   CRLF = System.sLineBreak;
+  GATING_ML_SLOT_NAME = 'gatingML';
+  EXTRA_KEYWORDS_SLOT_NAME = 'KVPairs';
 
 type
   TOnNeedsToAddErrorMessage = procedure(const aErrorMessage: string; aResult:
@@ -269,20 +271,29 @@ end;
 procedure TDNSEABridgeRScriptRunner.PerformAutoGating(const aInput:
     TExternalEvaluatorInput; aResultData: TExternalEvaluatorResult);
 var
-  s4Results: IS4Object;
-  gatingMl: string;
+  gatingML: string;
   resData: TAutoGatingExternalEvaluatorResultData;
+  s4Results: IS4Object;
 begin
   s4Results := GetS4Results(aInput, aResultData);
 
   if (s4Results <> nil) then
   begin
-    gatingMl := s4Results['gatingML'].AsCharacter.First;
+    // We require that a valid GatingML slot is present, but additional KV
+    // pairs are entirely optional; nonetheless, we won't bother with them
+    // unless we got a GatingML string.
 
-    if gatingMl <> '' then
+    gatingML := s4Results[GATING_ML_SLOT_NAME].AsCharacter.First;
+
+    if gatingML <> '' then
     begin
-      resData := TAutoGatingExternalEvaluatorResultData.create(nil);
-      resData.gatingMl := gatingMl;
+      resData := TAutoGatingExternalEvaluatorResultData.Create(nil);
+
+      resData.GatingML := gatingML;
+
+      resData.ExtraKVPairs.AddStrings(
+        s4Results[EXTRA_KEYWORDS_SLOT_NAME].AsCharacter.ToArray);
+
       aResultData.AddResultData(resData);
       aResultData.Status := EV_STATUS_OK;
     end

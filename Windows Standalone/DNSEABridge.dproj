@@ -5,7 +5,7 @@
         <FrameworkType>VCL</FrameworkType>
         <MainSource>DNSEABridge.dpr</MainSource>
         <Base>True</Base>
-        <Config Condition="'$(Config)'==''">DNSEABridge For WINE</Config>
+        <Config Condition="'$(Config)'==''">WINE</Config>
         <Platform Condition="'$(Platform)'==''">Win64</Platform>
         <TargetedPlatforms>3</TargetedPlatforms>
         <AppType>Application</AppType>
@@ -88,6 +88,19 @@
         <CfgParent>Cfg_4</CfgParent>
         <Cfg_4>true</Cfg_4>
         <Cfg_5>true</Cfg_5>
+        <Cfg_2>true</Cfg_2>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='WINE' or '$(Cfg_6)'!=''">
+        <Cfg_6>true</Cfg_6>
+        <CfgParent>Cfg_2</CfgParent>
+        <Cfg_2>true</Cfg_2>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="('$(Platform)'=='Win64' and '$(Cfg_6)'=='true') or '$(Cfg_6_Win64)'!=''">
+        <Cfg_6_Win64>true</Cfg_6_Win64>
+        <CfgParent>Cfg_6</CfgParent>
+        <Cfg_6>true</Cfg_6>
         <Cfg_2>true</Cfg_2>
         <Base>true</Base>
     </PropertyGroup>
@@ -175,6 +188,12 @@
         <AppEnableRuntimeThemes>true</AppEnableRuntimeThemes>
         <AppEnableHighDPI>true</AppEnableHighDPI>
     </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_6_Win64)'!=''">
+        <AppEnableRuntimeThemes>true</AppEnableRuntimeThemes>
+        <DCC_Define>WINE;$(DCC_Define)</DCC_Define>
+        <AppEnableHighDPI>true</AppEnableHighDPI>
+        <DCC_ExeOutput>.\MacOS</DCC_ExeOutput>
+    </PropertyGroup>
     <ItemGroup>
         <DelphiCompile Include="$(MainSource)">
             <MainSource>MainSource</MainSource>
@@ -188,16 +207,8 @@
             <Form>DNSEABridgeHiddenForm</Form>
             <FormType>dfm</FormType>
         </DCCReference>
-        <BuildConfiguration Include="DNSEABridge For WINE">
-            <Key>Cfg_4</Key>
-            <CfgParent>Cfg_5</CfgParent>
-        </BuildConfiguration>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
-        </BuildConfiguration>
-        <BuildConfiguration Include="Include release opaR in search paths">
-            <Key>Cfg_5</Key>
-            <CfgParent>Cfg_2</CfgParent>
         </BuildConfiguration>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
@@ -210,6 +221,18 @@
         <BuildConfiguration Include="Debug">
             <Key>Cfg_1</Key>
             <CfgParent>Base</CfgParent>
+        </BuildConfiguration>
+        <BuildConfiguration Include="WINE">
+            <Key>Cfg_6</Key>
+            <CfgParent>Cfg_2</CfgParent>
+        </BuildConfiguration>
+        <BuildConfiguration Include="DNSEABridge For WINE">
+            <Key>Cfg_4</Key>
+            <CfgParent>Cfg_5</CfgParent>
+        </BuildConfiguration>
+        <BuildConfiguration Include="Include release opaR in search paths">
+            <Key>Cfg_5</Key>
+            <CfgParent>Cfg_2</CfgParent>
         </BuildConfiguration>
     </ItemGroup>
     <ProjectExtensions>
