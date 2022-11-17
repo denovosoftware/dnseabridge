@@ -22,28 +22,29 @@ If not, see <http://www.gnu.org/licenses/>.
 interface
 
 uses
-  Vcl.ActnList,
   System.Actions,
   System.SysUtils,
   System.Classes,
   System.UITypes,
   System.Tether.Manager,
   System.Tether.AppProfile,
-
+  System.Tether.NetworkAdapter,
+  Vcl.ActnList,
   {Indy Sockets}
   IPPeerClient,
   IPPeerServer,
 
   {De Novo Software External Application Bridge}
 
-  {$IFDEf WINE}
+  {$IFDEF WINE}
   DNSEABridgeWineSpecificActivationUnit,
   {$ELSE}
   DNSEABridgeWindowsTrayIconUnit,
   {$ENDIF}
 
   ExternalEvaluatorClassesUnit,
-  DNSEABridgeRScriptRunnerUnit;
+  DNSEABridgeRScriptRunnerUnit
+  ;
 
 type
   TDNSEABridgeVCLDataModule = class(TDataModule)
@@ -70,18 +71,23 @@ type
     FErrorStringList: TStringList;
     FTetheringAppProfile: TTetheringAppProfile;
     FShowUI: boolean;
-  {$IFDEF WINE}
+    FREngineHasBeenSetup: boolean;
+{$IFDEF WINE}
     FWineSpecificAction: TDNSEABridgeWineSpecificActivation;
-  {$ELSE}
+{$ELSE}
     FDNSEABridgeTrayIconForm: TDNSEABridgeWindowsTrayIconForm;
-  {$ENDIF}
-    procedure LoadInputData;
+{$ENDIF}
+    procedure PrepareToCalculateInputUsingR;
     procedure CloseDNSEABridge(Sender: TObject);
     procedure HandleBeforeClosingBridge;
     procedure SetupApplicationEvents;
-    procedure SetupREngine;
     procedure SetupTetheringResourcesAndActions;
-    procedure UpdateRVersionInMenu;
+{$IFNDEF WINE}
+    procedure GetVersionOfRInstalled(out aRVersionString: string);
+{$ENDIF}
+    procedure TetheringManagerErrorHandler(const Sender, Data: TObject; AError:
+        TTetheringError);
+    procedure SetupREngineIfNeeded;
   strict protected
     procedure AppendErrorMessage(const aErrorMessage: string; aResult:
         TExternalEvaluatorResult; const aException: Exception = nil);
@@ -195,11 +201,6 @@ end;
 var
   DNSEABridgeMutexHandle: THandle;
 
-const
-  INPUT_NAME = 'RInputData';
-  RESULT_NAME = 'RResult';
-  SERVER_VERSION_NAME = 'ServerVersion';
-
 
 ///
 ///  TCloseThread gives us access to the main thread.
@@ -254,7 +255,7 @@ var
 begin
   autogatingResult := TExternalEvaluatorResult.Create(nil);
   try
-    LoadInputData;
+    PrepareToCalculateInputUsingR;
 
     FRScriptRunner.PerformAutogating(FInputData, autogatingResult);
   except
@@ -274,6 +275,9 @@ end;
 
 procedure TDNSEABridgeVCLDataModule.DataModuleDestroy(Sender: TObject);
 begin
+  // Just in-case we get here without properly closing the tray icon,
+  // we want to try again to hide the icon
+  HandleBeforeClosingBridge;
   // Actions that are added to the tethering profile will notify the profile when
   // they are freed. This will cause an access violation if we do not remove this
   // notification before freeing the tethering profile
@@ -300,14 +304,17 @@ begin
 end;
 
 procedure TDNSEABridgeVCLDataModule.DataModuleCreate(Sender: TObject);
+var
+  paramCntr: Integer;
 begin
+  FREngineHasBeenSetup := False;
   FErrorStringList := TStringList.Create;
   try
     // Check if the calling process wants to enablee the UI.
-    if (ParamCount > 0) and SameText(Trim(ParamStr(1)), DNSEABRIDGE_NO_UI_CMD_PARAM) then
-      FShowUI := False
-    else
-      FShowUI := True;
+    FShowUI := True;
+    for paramCntr := 1 to ParamCount do
+      if SameText(Trim(ParamStr(paramCntr)), DNSEABRIDGE_NO_UI_CMD_PARAM) then
+        FShowUI := False;
 
   {$IFDEF WINE}
     FWineSpecificAction := TDNSEABridgeWineSpecificActivation.Create;
@@ -316,22 +323,24 @@ begin
   {$ELSE}
     FDNSEABridgeTrayIconForm := TDNSEABridgeWindowsTrayIconForm.Create(nil);
     FDNSEABridgeTrayIconForm.OnNeedsToQuitApplication := CloseDNSEABridge;
+    FDNSEABridgeTrayIconForm.OnNeedsVersionOfR := GetVersionOfRInstalled;
   {$ENDIF}
 
     FInputData := TExternalEvaluatorInput.Create(nil);
 
     FDenovoRemoteOpaRTetheringManager:= TTetheringManager.Create(nil);
-    FDenovoRemoteOpaRTetheringManager.Password := '2667F497E81344268D5BCBF062A6E3C0';
-    FDenovoRemoteOpaRTetheringManager.Text := 'DenovoRemoteOpaRTetheringManager';
-    FDenovoRemoteOpaRTetheringManager.Name := 'DenovoRemoteOpaRTetheringManager';
+    FDenovoRemoteOpaRTetheringManager.Password := TETHERING_MANAGER_PASSWORD;
+    FDenovoRemoteOpaRTetheringManager.Text := TETHERING_REMOTE_MANAGER_NAME;
+    FDenovoRemoteOpaRTetheringManager.Name := TETHERING_REMOTE_MANAGER_NAME;
     FDenovoRemoteOpaRTetheringManager.AllowedAdapters := 'Network';
     FDenovoRemoteOpaRTetheringManager.Enabled := True;
+    FDenovoRemoteOpaRTetheringManager.OnError := TetheringManagerErrorHandler;
 
     FTetheringAppProfile:= TTetheringAppProfile.Create(nil);
     FTetheringAppProfile.Manager := FDenovoRemoteOpaRTetheringManager;
-    FTetheringAppProfile.Group := 'DenovoOpaREvaluator';
-    FTetheringAppProfile.Name := 'TetheringAppProfile';
-    FTetheringAppProfile.Text := 'TetheringAppProfile';
+    FTetheringAppProfile.Group := DNSEABRIDGE_OPA_R_GROUP_NAME;
+    FTetheringAppProfile.Name := TETHERING_PROFILE_NAME;
+    FTetheringAppProfile.Text := TETHERING_PROFILE_NAME;
     FTetheringAppProfile.Visible := True;
     FTetheringAppProfile.Enabled := True;
 
@@ -341,11 +350,9 @@ begin
     // messages and to close the DNSEABridge will be hooked up.
     SetupTetheringResourcesAndActions;
 
-    // Finally, setup the script runner. The most likely place for errors to
-    // occur will be here.
+    // Finally, create the script runner.
     FRScriptRunner := TDNSEABridgeRScriptRunner.Create(self);
     FRScriptRunner.OnNeedsToAppendErrorMessage := AppendErrorMessage;
-    SetupREngine;
 
   except
     // If we have any exceptions when setting up the EA bridge, then pass the
@@ -365,7 +372,7 @@ procedure TDNSEABridgeVCLDataModule.InputDataResourceReceived(const Sender:
     TObject; const AResource: TRemoteResource);
 begin
   // Check for input data
-  if (AResource.Name = INPUT_NAME) then
+  if AResource.Name = DNSEABRIDGE_INPUT_NAME then
   begin
     AResource.Value.AsStream.Position := 0;
     FInputData.LoadFromStream(AResource.Value.AsStream);
@@ -379,7 +386,7 @@ begin
   clusteringResult := TExternalEvaluatorResult.Create(nil);
 
   try
-    LoadInputData;
+    PrepareToCalculateInputUsingR;
 
     FRScriptRunner.PerformClustering(FInputData, clusteringResult);
   except
@@ -398,7 +405,7 @@ var
 begin
   newParamResult := TExternalEvaluatorResult.Create(nil);
   try
-    LoadInputData;
+    PrepareToCalculateInputUsingR;
 
     FRScriptRunner.PerformNewParam(FInputData, newParamResult);
   except
@@ -442,7 +449,7 @@ begin
   outStream.Position := 0;
   aResult.SaveToStream(outStream);
   outStream.Position := 0;
-  TetheringAppProfile.Resources.FindByName(RESULT_NAME).Value := outStream;
+  TetheringAppProfile.Resources.FindByName(DNSEABRIDGE_REMOTE_RESULT_NAME).Value := outStream;
   outStream.Free;
 end;
 
@@ -459,17 +466,32 @@ end;
 
 procedure TDNSEABridgeVCLDataModule.DoOnException(Sender: TObject; aException:
     Exception);
+var
+  versionResource: TLocalResource;
 begin
   ErrorStringList.Add(Format('%s: %s',[aException.ClassName, aException.Message]));
 
-  if Assigned(FTetheringAppProfile) and
-    Assigned(FTetheringAppProfile.Resources.FindByName(SERVER_VERSION_NAME)) then
+  versionResource := nil;
+  if Assigned(FTetheringAppProfile) then
   begin
-    FTetheringAppProfile.Resources.FindByName(SERVER_VERSION_NAME).Value := 0;
-  end
+      versionResource := FTetheringAppProfile.Resources.FindByName(
+                          DNS_EA_BRIDGE_VERSION_VERSION_NAME);
+  end;
+
+  if Assigned(versionResource) then
+    versionResource.Value := 0
   else
     LogExceptionInFile(aException);
 end;
+
+{$IFNDEF WINE}
+procedure TDNSEABridgeVCLDataModule.GetVersionOfRInstalled(out aRVersionString:
+    string);
+begin
+  SetupREngineIfNeeded;
+  aRVersionString := FRScriptRunner.CurrentVersionOfRdll;
+end;
+{$ENDIF}
 
 procedure TDNSEABridgeVCLDataModule.HandleBeforeClosingBridge;
 begin
@@ -480,14 +502,16 @@ begin
 {$ENDIF}
 end;
 
-procedure TDNSEABridgeVCLDataModule.LoadInputData;
+procedure TDNSEABridgeVCLDataModule.PrepareToCalculateInputUsingR;
 var
   profileInfo: TTetheringProfileInfo;
   inputStream: TStream;
 begin
+  SetupREngineIfNeeded;
+
   profileInfo := DenovoRemoteOpaRTetheringManager.RemoteProfiles.Items[0];
   inputStream := TetheringAppProfile.GetRemoteResourceValue(
-                    profileInfo, INPUT_NAME).Value.AsStream;
+                    profileInfo, DNSEABRIDGE_INPUT_NAME).Value.AsStream;
 
   inputStream.Position := 0;
   FInputData.LoadFromStream(inputStream);
@@ -502,12 +526,23 @@ begin
   {$ENDIF}
 end;
 
-procedure TDNSEABridgeVCLDataModule.SetupREngine;
+procedure TDNSEABridgeVCLDataModule.SetupREngineIfNeeded;
 begin
-  FRScriptRunner.SetupREngine;
-  FTetheringAppProfile.Resources.FindByName(SERVER_VERSION_NAME).Value :=
-                    ExternalEvaluatorClassesUnit.CURRENT_DNS_EA_BRIDGE_VERSION;
-  UpdateRVersionInMenu;
+  TThread.Synchronize(
+    TThread.CurrentThread,
+    procedure
+    begin
+      if not FREngineHasBeenSetup then
+      begin
+        FREngineHasBeenSetup := True;
+        try
+          FRScriptRunner.SetupREngine;
+        except
+          on E: Exception do
+            DoOnException(self, E);
+        end;
+      end;
+    end);
 end;
 
 procedure TDNSEABridgeVCLDataModule.SetupTetheringResourcesAndActions;
@@ -516,68 +551,72 @@ var
   tetheringAction: TLocalAction;
 begin
   tetheringResource:= FTetheringAppProfile.Resources.Add;
-  tetheringResource.Name := 'RInputData';
+  tetheringResource.Name := DNSEABRIDGE_INPUT_NAME;
   tetheringResource.ResType := TRemoteResourceType.Stream;
   tetheringResource.Kind := TTetheringRemoteKind.Shared;
   tetheringResource.OnResourceReceived := InputDataResourceReceived;
 
   tetheringResource:= FTetheringAppProfile.Resources.Add;
-  tetheringResource.Name := 'RResult';
+  tetheringResource.Name := DNSEABRIDGE_REMOTE_RESULT_NAME;
   tetheringResource.IsPublic := True;
   tetheringResource.ResType := TRemoteResourceType.Stream;
   tetheringResource.Kind := TTetheringRemoteKind.Shared;
 
   tetheringResource:= FTetheringAppProfile.Resources.Add;
-  tetheringResource.Name := 'ServerVersion';
+  tetheringResource.Name := DNS_EA_BRIDGE_VERSION_VERSION_NAME;
   tetheringResource.ResType := TRemoteResourceType.Data;
   tetheringResource.Kind := TTetheringRemoteKind.Shared;
   tetheringResource.OnResourceReceived := InputDataResourceReceived;
+  tetheringResource.Value :=
+                        ExternalEvaluatorClassesUnit.CURRENT_DNS_EA_BRIDGE_VERSION;
 
   tetheringAction:= FTetheringAppProfile.Actions.Add;
-  tetheringAction.Name := 'acRunCluster';
+  tetheringAction.Name := DNSEABRIDGE_CLUSTER_ACTION_NAME;
   tetheringAction.Kind := TTetheringRemoteKind.Shared;
   tetheringAction.Action := acRunCluster;
   tetheringAction.NotifyUpdates := False;
 
   tetheringAction:= FTetheringAppProfile.Actions.Add;
-  tetheringAction.Name := 'acNewParam';
+  tetheringAction.Name := DNSEABRIDGE_NEW_PARAM_ACTION_NAME;
   tetheringAction.Kind := TTetheringRemoteKind.Shared;
   tetheringAction.Action := acNewParam;
   tetheringAction.NotifyUpdates := False;
 
   tetheringAction:= FTetheringAppProfile.Actions.Add;
-  tetheringAction.Name := 'acCloseDNSEABridge';
+  tetheringAction.Name := DNSEABRIDGE_CLOSE_ACTION_NAME;
   tetheringAction.Kind := TTetheringRemoteKind.Shared;
   tetheringAction.Action := acCloseDNSEABridge;
   tetheringAction.NotifyUpdates := False;
 
   tetheringAction:= FTetheringAppProfile.Actions.Add;
-  tetheringAction.Name := 'acGetExceptionsText';
+  tetheringAction.Name := DNSEABRIDGE_GET_EXCEPTION_ACTION_NAME;
   tetheringAction.Kind := TTetheringRemoteKind.Shared;
   tetheringAction.Action := acGetExceptionsText;
   tetheringAction.NotifyUpdates := False;
 
   tetheringAction:= FTetheringAppProfile.Actions.Add;
-  tetheringAction.Name := 'acAutoGating';
+  tetheringAction.Name := DNSEABRIDGE_AUTOGATING_ACTION_NAME;
   tetheringAction.Kind := TTetheringRemoteKind.Shared;
   tetheringAction.Action := acAutoGating;
   tetheringAction.NotifyUpdates := False;
 end;
 
-
-procedure TDNSEABridgeVCLDataModule.UpdateRVersionInMenu;
-{$IFDEF WINE}
-begin
-end;
-{$ELSE}
+procedure TDNSEABridgeVCLDataModule.TetheringManagerErrorHandler(const Sender,
+    Data: TObject; AError: TTetheringError);
 var
-  curRDllVersion: string;
+  dataAsAdapter: TTetheringAdapter;
+  errorMsg: string;
 begin
-  curRDllVersion := FRScriptRunner.CurrentVersionOfRdll;
+  if (aError = TTetheringError.InitAdapterError) and
+      (Data is TTetheringAdapter) then
+  begin
+    dataAsAdapter := Data as TTetheringAdapter;
 
-  FDNSEABridgeTrayIconForm.VersionOfRAsString := 'R Version: ' + curRDllVersion;
+    errorMsg := Format(
+        'Unable to StartListening on adapter: %s', [dataAsAdapter.AdapterType]);
+    ErrorStringList.Add(errorMsg);
+  end;
 end;
-{$ENDIF}
 
 
 initialization

@@ -22,12 +22,25 @@ If not, see <http://www.gnu.org/licenses/>.
 interface
 
 uses
-  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
-  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ExtCtrls, Vcl.Menus,
-  System.ImageList, Vcl.ImgList,
+  Winapi.Windows,
+  Winapi.Messages,
+  System.SysUtils,
+  System.Variants,
+  System.Classes,
+  System.ImageList,
+  System.UITypes,
+  Vcl.Graphics,
+  Vcl.Controls,
+  Vcl.Forms,
+  Vcl.Dialogs,
+  Vcl.ExtCtrls,
+  Vcl.Menus,
+  Vcl.ImgList,
   AboutDNSEABridgeFormUnit;
 
 type
+  TNeedsRVersionEvent = procedure(out aRServerVersion: string) of object;
+
   TDNSEABridgeWindowsTrayIconForm = class(TForm)
     popupMenuTrayIcon: TPopupMenu;
     DNSEABridgeWindowsTrayIcon: TTrayIcon;
@@ -41,14 +54,15 @@ type
     procedure popupMenuTrayIconPopup(Sender: TObject);
   strict private
     FOnNeedsToQuitApplication: TNotifyEvent;
-    FVersionOfRAsString: string;
+    FOnNeedsVersionOfR: TNeedsRVersionEvent;
+    function GetRVersion: string;
     procedure DoNeedsToQuitApplication(Sender: TObject);
     procedure ShowAboutForm;
     procedure QuitDNSEABridgeWithWarning(Sender: TObject);
   public
     procedure PrepareToShutdownApplication;
-    property VersionOfRAsString: string read FVersionOfRAsString write
-        FVersionOfRAsString;
+    property OnNeedsVersionOfR: TNeedsRVersionEvent read FOnNeedsVersionOfR write
+        FOnNeedsVersionOfR;
     property OnNeedsToQuitApplication: TNotifyEvent read FOnNeedsToQuitApplication
         write FOnNeedsToQuitApplication;
   end;
@@ -58,8 +72,6 @@ var
 
 implementation
 
-uses
-  System.UITypes;
 
 {$R *.dfm}
 const
@@ -125,18 +137,32 @@ begin
     );
 end;
 
+function TDNSEABridgeWindowsTrayIconForm.GetRVersion: string;
+begin
+  Result := '';
+  if Assigned(OnNeedsVersionOfR) then
+    OnNeedsVersionOfR(result);
+end;
+
 procedure TDNSEABridgeWindowsTrayIconForm.popupMenuTrayIconPopup(Sender:
     TObject);
 var
   setCaptionThread: TSetRDllCaptionThread;
+  rVersion: string;
 begin
-  setCaptionThread := TSetRDllCaptionThread.Create(mniRDllVersion, VersionOfRAsString);
+  rVersion := GetRVersion;
+  setCaptionThread := TSetRDllCaptionThread.Create(mniRDllVersion, rVersion);
   setCaptionThread.Start;
 end;
 
 procedure TDNSEABridgeWindowsTrayIconForm.PrepareToShutdownApplication;
 begin
-  DNSEABridgeWindowsTrayIcon.Visible := False;
+  TThread.Synchronize(
+    TThread.CurrentThread,
+    procedure
+    begin
+      DNSEABridgeWindowsTrayIcon.Visible := False;
+    end);
 end;
 
 procedure TDNSEABridgeWindowsTrayIconForm.QuitDNSEABridgeWithWarning(Sender:

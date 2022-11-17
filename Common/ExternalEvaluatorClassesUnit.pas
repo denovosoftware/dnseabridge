@@ -4,7 +4,7 @@ unit ExternalEvaluatorClassesUnit;
 This De Novo Software External Application Bridge accepts data via TCP/IP and
 converts it into a format required for the opaR library.
 
-Copyright (C) 2016 De Novo Software
+Copyright (C) 2016-2021 De Novo Software
 
 This program is free software: you can redistribute it and/or modify it under the terms of 
 the GNU General Public License as published by the Free Software Foundation, either 
@@ -31,13 +31,30 @@ const
   EV_STATUS_OK = 0;
   EV_STATUS_ERROR = 1;
 
-  CURRENT_DNS_EA_BRIDGE_VERSION = 4;
+  CURRENT_DNS_EA_BRIDGE_VERSION = 5;
+  DNS_EA_BRIDGE_VERSION_VERSION_NAME = 'ServerVersion';
 
   DNSEABRIDGE_ERROR_LOG_APPDATA_FOLDER = 'De Novo Software\External Application Bridge\';
   DNSEABRIDGE_ERROR_LOG_FILE_NAME = 'DNSEABridgeErrors.txt';
 
   DNSEABRIDGE_ERROR_LOG = DNSEABRIDGE_ERROR_LOG_APPDATA_FOLDER + DNSEABRIDGE_ERROR_LOG_FILE_NAME;
   DNSEABRIDGE_NO_UI_CMD_PARAM = '-NoUI';
+
+  DNSEABRIDGE_OPA_R_GROUP_NAME = 'DenovoOpaREvaluator';
+  TETHERING_REMOTE_MANAGER_NAME = 'DenovoRemoteOpaRTetheringManager';
+  TETHERING_MANAGER_PASSWORD = '2667F497E81344268D5BCBF062A6E3C0';
+  TETHERING_PROFILE_NAME = 'TetheringAppProfile';
+
+  DNSEABRIDGE_REMOTE_RESULT_NAME = 'RResult';
+  DNSEABRIDGE_INPUT_NAME = 'RInputData';
+
+
+  DNSEABRIDGE_CLUSTER_ACTION_NAME = 'acRunCluster';
+  DNSEABRIDGE_NEW_PARAM_ACTION_NAME = 'acNewParam';
+  DNSEABRIDGE_CLOSE_ACTION_NAME = 'acCloseDNSEABridge';
+  DNSEABRIDGE_GET_EXCEPTION_ACTION_NAME = 'acGetExceptionsText';
+  DNSEABRIDGE_AUTOGATING_ACTION_NAME = 'acAutoGating';
+
 
 type
   TGenericDataType = (
@@ -190,6 +207,7 @@ type
     ['{DFABC3D7-9934-4A85-BCC1-B6546A26B177}']
     function IdentifierName: string;
     procedure InitializeConnections;
+    procedure CloseConnectionGracefully;
     procedure AddConnectionCompleteNotifier(const aNeedsConnectionNotification:
         INeedConnectionCompleteNotifications);
     procedure RemoveConnectionCompleteNotifier(const aNeedsConnectionNotification:

@@ -4,7 +4,7 @@ unit DNSEABridgeRScriptRunnerUnit;
 This De Novo Software External Application Bridge accepts data via TCP/IP and
 converts it into a format required for the opaR library.
 
-Copyright (C) 2017 De Novo Software
+Copyright (C) 2017-2021 De Novo Software
 
 This program is free software: you can redistribute it and/or modify it under the terms of
 the GNU General Public License as published by the Free Software Foundation, either
@@ -283,23 +283,31 @@ begin
     // pairs are entirely optional; nonetheless, we won't bother with them
     // unless we got a GatingML string.
 
-    gatingML := s4Results[GATING_ML_SLOT_NAME].AsCharacter.First;
-
-    if gatingML <> '' then
+    if s4Results.HasSlot(GATING_ML_SLOT_NAME) then
     begin
-      resData := TAutoGatingExternalEvaluatorResultData.Create(nil);
+      gatingML := s4Results[GATING_ML_SLOT_NAME].AsCharacter.First;
 
-      resData.GatingML := gatingML;
+      if gatingML.IsEmpty then
+        DoAppendErrorMessage('Empty GatingML was returned', aResultData)
+      else
+      begin
+        resData := TAutoGatingExternalEvaluatorResultData.Create(nil);
 
-      resData.ExtraKVPairs.AddStrings(
-        s4Results[EXTRA_KEYWORDS_SLOT_NAME].AsCharacter.ToArray);
+        resData.GatingML := gatingML;
 
-      aResultData.AddResultData(resData);
-      aResultData.Status := EV_STATUS_OK;
-    end
+        if s4Results.HasSlot(EXTRA_KEYWORDS_SLOT_NAME) then
+        begin
+          resData.ExtraKVPairs.AddStrings(
+            s4Results[EXTRA_KEYWORDS_SLOT_NAME].AsCharacter.ToArray);
+        end;
+
+        aResultData.AddResultData(resData);
+        aResultData.Status := EV_STATUS_OK;
+      end; // [Non-empty GatingML string returned] ...
+    end // if s4Results.HasSlot(GATING_ML_SLOT_NAME) then ...
     else
-      DoAppendErrorMessage('Gating ML was not returned', aResultData);
-  end
+      DoAppendErrorMessage('GatingML was not returned', aResultData);
+  end // if (s4Results <> nil) then ...
   else
     DoAppendErrorMessage('Result data invalid.', aResultData);
 end;
