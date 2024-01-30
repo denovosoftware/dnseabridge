@@ -1,10 +1,10 @@
 unit ExternalEvaluatorClassesUnit;
 
 {***************************************************************************************************
-This De Novo Software External Application Bridge accepts data via TCP/IP and
+This De Novo Software External Application Bridge accepts data via WM_COPY messages and
 converts it into a format required for the opaR library.
 
-Copyright (C) 2016-2021 De Novo Software
+Copyright (C) 2016-2023 De Novo Software
 
 This program is free software: you can redistribute it and/or modify it under the terms of 
 the GNU General Public License as published by the Free Software Foundation, either 
@@ -31,8 +31,7 @@ const
   EV_STATUS_OK = 0;
   EV_STATUS_ERROR = 1;
 
-  CURRENT_DNS_EA_BRIDGE_VERSION = 5;
-  DNS_EA_BRIDGE_VERSION_VERSION_NAME = 'ServerVersion';
+  CURRENT_DNS_EA_BRIDGE_VERSION = 6;
 
   DNSEABRIDGE_ERROR_LOG_APPDATA_FOLDER = 'De Novo Software\External Application Bridge\';
   DNSEABRIDGE_ERROR_LOG_FILE_NAME = 'DNSEABridgeErrors.txt';
@@ -40,27 +39,21 @@ const
   DNSEABRIDGE_ERROR_LOG = DNSEABRIDGE_ERROR_LOG_APPDATA_FOLDER + DNSEABRIDGE_ERROR_LOG_FILE_NAME;
   DNSEABRIDGE_NO_UI_CMD_PARAM = '-NoUI';
 
-  DNSEABRIDGE_OPA_R_GROUP_NAME = 'DenovoOpaREvaluator';
-  TETHERING_REMOTE_MANAGER_NAME = 'DenovoRemoteOpaRTetheringManager';
-  TETHERING_MANAGER_PASSWORD = '2667F497E81344268D5BCBF062A6E3C0';
-  TETHERING_PROFILE_NAME = 'TetheringAppProfile';
-
-  DNSEABRIDGE_REMOTE_RESULT_NAME = 'RResult';
-  DNSEABRIDGE_INPUT_NAME = 'RInputData';
-
-
-  DNSEABRIDGE_CLUSTER_ACTION_NAME = 'acRunCluster';
-  DNSEABRIDGE_NEW_PARAM_ACTION_NAME = 'acNewParam';
-  DNSEABRIDGE_CLOSE_ACTION_NAME = 'acCloseDNSEABridge';
-  DNSEABRIDGE_GET_EXCEPTION_ACTION_NAME = 'acGetExceptionsText';
-  DNSEABRIDGE_AUTOGATING_ACTION_NAME = 'acAutoGating';
-
-
 type
+  TExternalEvaluatorActions = (
+    eea_RunCluster,
+    eea_NewParam,
+    eea_AutoGating);
+
   TGenericDataType = (
     gdt_IsSingle,
     gdt_IsClassification,
     gdt_NoData);
+
+  TExternalEvaluatorConnectionStatus = (
+    eecs_Connected,
+    eecs_Connecting,
+    eecs_ConnectionFailed);
 
   TAbstractExternalEvaluatorResultData = class(TComponent)
   strict private
@@ -172,6 +165,7 @@ type
     STREAM_VERSION: integer = 1;
     INPUT_MTX_STREAM_VERSION: integer = 1;
   strict private
+    FEvaluatorAction: TExternalEvaluatorActions;
     FScriptFileName: string;
     FInputMatrix: TDoubleMatrix;
     FParameterNames: TStringList;
@@ -192,11 +186,12 @@ type
     property InputMatrix: TDoubleMatrix read FInputMatrix write FInputMatrix;
   published
     // The script file name is the path and name of the script that will be executeded by the  evaluator.
+    property EvaluatorAction: TExternalEvaluatorActions read FEvaluatorAction write
+        FEvaluatorAction;
     property ScriptFileName: string read FScriptFileName write FScriptFileName;
     property ParameterNames: TStringList read FParameterNames write SetParameterNames;
     property EventsAsRows: boolean read FEventsAsRows write FEventsAsRows;
   end;
-
 
   INeedConnectionCompleteNotifications = interface
     ['{036359C5-5762-4D3F-8A7D-924EBDAEAF7C}']
@@ -291,8 +286,8 @@ begin
 
   if ver <> STREAM_VERSION then
   begin
-    raise Exception.CreateFmt('Incorrect ersion number streaming ' +
-        'TExternalEvaluatorResultDataList.%sExpected: %d Found: %d',
+    raise Exception.CreateFmt('Incorrect version number streaming ' +
+        'TExternalEvaluatorResultDataList.%sExpected: %d. Found: %d',
         [sLineBReak, STREAM_VERSION, ver]);
   end;
 

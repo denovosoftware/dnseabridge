@@ -4,7 +4,7 @@ unit DNSEABridgeRScriptRunnerUnit;
 This De Novo Software External Application Bridge accepts data via TCP/IP and
 converts it into a format required for the opaR library.
 
-Copyright (C) 2017-2021 De Novo Software
+Copyright (C) 2017-2023 De Novo Software
 
 This program is free software: you can redistribute it and/or modify it under the terms of
 the GNU General Public License as published by the Free Software Foundation, either
